@@ -6,13 +6,15 @@ Setline helps brand teams run retail display programs with their vendors: it gen
 
 ## Status
 
-Early scaffold. Working today, on sample data:
+Working today:
 
-- Programs dashboard (`/programs`) and program detail (`/programs/:id`)
-- Lead-time profiles by vendor, origin and process, with a live preview (`/settings/lead-times`)
-- Timeline engine with tests (`src/lib/timeline`)
+- Passwordless sign-in by email link, workspaces, invitations and six roles enforced on the server
+- Programs dashboard, program detail, new program, and marking key dates done
+- Lead-time profiles by vendor, origin and process that you can edit and save, with a live preview
+- Team page with invitations
+- Timeline engine and service layer with tests
 
-Not built yet: database, sign-in, roles, saving changes, and the remaining screens. See `docs/build-brief.md` for the plan.
+Not built yet: approvals and proofs, vendor portal, guidelines, in-store tracker, integrations, and the multi-step create flow. See `docs/build-brief.md` for the plan.
 
 ## Run it
 
@@ -20,6 +22,12 @@ Not built yet: database, sign-in, roles, saving changes, and the remaining scree
 npm install
 npm run dev
 ```
+
+No setup is needed for development: the app uses an embedded database in `.data/` and shows the sign-in link on screen instead of emailing it.
+
+## Deploy it
+
+Set the variables in `.env.example` (`DATABASE_URL`, `APP_URL`, `RESEND_API_KEY`, `EMAIL_FROM`), then run `npm run db:migrate` once against the database before starting the app.
 
 ## Check it
 

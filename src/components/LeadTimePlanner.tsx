@@ -1,29 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Vendor } from "@/lib/data/seed";
 import { MILESTONES, MILESTONE_LABELS, STEPS, STEP_LABELS, formatLong, resolveLeadTimes, scheduleBackward } from "@/lib/timeline";
+import type { PlannerVendor } from "@/lib/leadTimeScope";
 import type { LeadTimeProfile, Origin, StepDurations, StepKey } from "@/lib/timeline";
+
 
 const FIELD = "h-12 w-full rounded-[10px] border-[1.5px] border-control bg-surface px-3 text-[15px] font-medium text-ink";
 
-function scopeText(profile: LeadTimeProfile, vendors: Vendor[], processes: { id: string; label: string }[]): string {
-  const parts: string[] = [];
-  if (profile.scope.vendorId) parts.push(vendors.find((v) => v.id === profile.scope.vendorId)?.name ?? "One vendor");
-  if (profile.scope.origin) parts.push(profile.scope.origin === "overseas" ? "Made overseas" : "Made domestically");
-  if (profile.scope.process) parts.push(processes.find((p) => p.id === profile.scope.process)?.label ?? profile.scope.process);
-  if (profile.scope.displayType) parts.push(profile.scope.displayType);
-  return parts.length ? parts.join(" · ") : "Every program";
-}
-
 export function LeadTimePlanner({ profiles, vendors, processes }: {
   profiles: LeadTimeProfile[];
-  vendors: Vendor[];
+  vendors: PlannerVendor[];
   processes: { id: string; label: string }[];
 }) {
   const [vendorId, setVendorId] = useState("");
   const [origin, setOrigin] = useState<Origin>("domestic");
-  const [process, setProcess] = useState(processes[0].id);
+  const [process, setProcess] = useState(processes[0]?.id ?? "");
   const [inStore, setInStore] = useState("2027-04-19");
   const [overrides, setOverrides] = useState<Partial<StepDurations>>({});
 
@@ -51,36 +43,10 @@ export function LeadTimePlanner({ profiles, vendors, processes }: {
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="rounded-[18px] border border-line bg-surface px-6 py-5">
-        <h2 className="font-display text-xl font-bold">Your profiles</h2>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-line text-[11px] font-semibold tracking-wider text-muted uppercase">
-                <th className="pb-2.5 font-semibold">Profile</th>
-                <th className="pb-2.5 font-semibold">Applies to</th>
-                <th className="pb-2.5 font-semibold">Sets</th>
-              </tr>
-            </thead>
-            <tbody>
-              {profiles.map((profile) => (
-                <tr key={profile.id} className="border-b border-line last:border-b-0">
-                  <td className="py-3.5 pr-4 font-semibold">{profile.name}</td>
-                  <td className="py-3.5 pr-4 text-muted">{scopeText(profile, vendors, processes)}</td>
-                  <td className="py-3.5">
-                    {STEPS.filter((s) => profile.steps[s]).map((s) => `${STEP_LABELS[s]} ${profile.steps[s]!.days}d`).join(" · ")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       <div className="flex flex-wrap items-start gap-6">
         <section className="min-w-0 flex-[999_1_520px] rounded-[18px] border border-line bg-surface px-6 py-5">
           <h2 className="font-display text-xl font-bold">Try it out</h2>
-          <p className="mt-1 text-[13px] text-muted">Pick a situation and change any number. This is a preview and is not saved yet.</p>
+          <p className="mt-1 text-[13px] text-muted">Pick a situation and change any number to see what it does to the dates. Nothing here is saved.</p>
 
           <div className="mt-4 flex flex-wrap gap-4">
             <label className="flex flex-[1_1_200px] flex-col gap-1.5 text-sm font-semibold">
