@@ -15,8 +15,8 @@ The artifact links are private to the owner. If you cannot open them, ask for sc
 ## Recommended stack (assumption, not yet confirmed)
 
 - Next.js (App Router) with TypeScript
-- PostgreSQL with Prisma
-- Auth with email magic links and invitations (Auth.js or a hosted provider)
+- PostgreSQL with Drizzle
+- Sign-in by emailed link with invitations, sessions stored in the database
 - Tailwind CSS driven by the design tokens below
 - S3-compatible object storage for artwork, proofs, guidelines and store photos
 - Background jobs for recalculation, reminders and integration syncs
@@ -139,9 +139,20 @@ Default milestones and durations used in the sample data. These are placeholders
 ## What is already built
 
 - Next.js and TypeScript project with the Gallery tokens, status pills and stage bar
-- Timeline engine and lead-time profiles, with unit tests (`npm test`)
-- `/programs` dashboard, `/programs/:id` detail and `/settings/lead-times`, all reading sample data from `src/lib/data/seed.ts`
-- Not built yet: database, auth, roles, saving anything, and every other screen
+- Timeline engine and lead-time profiles, with unit tests
+- Postgres schema and migrations with Drizzle (`src/lib/db`), with an embedded database for development
+- Passwordless email sign-in with database sessions, workspaces, invitations, and the six roles checked on the server (`src/lib/auth`, `src/lib/services`)
+- `/programs`, `/programs/new`, `/programs/:id` (with "mark done" on the next key date), `/settings/lead-times` (saved edits), `/settings/team`
+- New workspaces can start with sample programs placed around today's date
+
+Decisions made while building, which differ from the first draft of this brief:
+
+- Drizzle instead of Prisma, because it runs the same schema on hosted Postgres and on the embedded development database with no extra services
+- Sign-in is implemented in the project (about 100 lines in `src/lib/auth/core.ts`) instead of Auth.js, whose current major version is still in beta. It can be swapped for a library later without touching the services.
+- Milestone completion dates are stored on the program for now and move to their own table when approvals are built
+- A person belongs to one workspace for now
+
+Not verified yet: a real hosted Postgres (only the embedded one has been run) and real email delivery through Resend.
 
 ## Screens and routes
 
@@ -205,5 +216,5 @@ Phase 3:
 - Whether a program can be submitted while a required item (for example ship-to details) is missing
 - Whether vendor guest access is free
 - How retailer guidelines attach automatically when a retailer is chosen
-- Hosting, auth provider and file storage choices
+- Hosting, database host, email sender address and file storage choices
 - The name Setline still needs trademark and domain clearance
