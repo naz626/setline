@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { StageBar } from "@/components/StageBar";
 import { StatusIcon, StatusPill } from "@/components/StatusPill";
@@ -12,6 +13,8 @@ import { todayInZone } from "@/lib/today";
 
 async function Programs() {
   const member = await requireMember();
+  // Vendor contacts have their own home, worded from their side.
+  if (member.membership.role === "vendorGuest") redirect("/vendor");
   const views = await listProgramViews(await getDb(), member);
   const today = todayInZone(member.workspace.timezone);
   const canCreate = can(member.membership.role, "programs.create");

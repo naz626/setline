@@ -1,27 +1,58 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { CompleteMilestoneForm } from "@/components/ProgramForms";
+import { GuidelineLinks } from "@/components/Guidelines";
+import { CompleteMilestoneForm, MoveInStoreDateForm } from "@/components/ProgramForms";
+import { SubmitProofForm } from "@/components/ProofForms";
+import { AssignVendorForm, VendorStatusForm } from "@/components/VendorForms";
 import { StatusPill } from "@/components/StatusPill";
 import { can } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
+import { guidelinesForProgram } from "@/lib/services/guidelines";
 import { getProgramView } from "@/lib/services/programs";
-import { HEALTH_STYLES, STAGES, VENDOR_STYLES } from "@/lib/status";
+import { PROOF_KINDS, PROOF_LABELS, approvalStatus, listProofsForProgram } from "@/lib/services/proofs";
+import { listStores, storeStep } from "@/lib/services/stores";
+import { listStatusHistory, listVendors } from "@/lib/services/vendors";
+import { APPROVAL_STYLES, HEALTH_STYLES, STAGES, VENDOR_STYLES } from "@/lib/status";
+import { formatStamp } from "@/lib/today";
 import { MILESTONES, MILESTONE_LABELS, MILESTONE_OWNER, STEPS, STEP_LABELS, daysBetween, formatLong, formatShort } from "@/lib/timeline";
+
+const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 
 async function Program({ params }: { params: Promise<{ id: string }> }) {
   const member = await requireMember();
+  const role = member.membership.role;
+  if (role === "vendorGuest") redirect("/vendor");
   const { id } = await params;
-  const view = await getProgramView(await getDb(), member, id);
+  const db = await getDb();
+  const view = await getProgramView(db, member, id);
   if (!view) notFound();
+
+  const canEdit = can(role, "programs.editSchedule");
+  const seesProofs = can(role, "proofs.view");
+  const [proofRows, guidelineItems, stores, history, vendorList] = await Promise.all([
+    seesProofs ? listProofsForProgram(db, member, id) : [],
+    guidelinesForProgram(db, member, view.program),
+    listStores(db, member, id),
+    listStatusHistory(db, member, id),
+    canEdit ? listVendors(db, member) : [],
+  ]);
 
   const { program, vendor, planned, projected, completed, next, health, vendorState, leadTimes, today } = view;
   const healthStyle = HEALTH_STYLES[health];
   const stageIndex = STAGES.findIndex((s) => s.key === view.stage);
   const late = projected.inStore > planned.inStore;
   const ownerName = { brand: "Brand team", vendor: vendor?.name ?? "Vendor", target: "Target" };
-  const canEdit = can(member.membership.role, "programs.editSchedule");
+  const approvals = PROOF_KINDS.map((kind) => {
+    const latest = proofRows.find((p) => p.kind === kind);
+    return { kind, latest, status: approvalStatus(Boolean(completed[kind]), latest) };
+  });
+  const sendable = approvals.filter((a) => a.status === "awaitingProof" || a.status === "changesRequested").map((a) => ({ id: a.kind, label: PROOF_LABELS[a.kind] }));
+  const open = !completed.inStore;
+  const vendorChoices = vendorList.map((v) => ({ id: v.vendor.id, name: v.vendor.name }));
+  const canChangeVendor = canEdit && open && !completed.productionComplete;
+  const installed = stores.filter((s) => storeStep(s) === "installed").length;
 
   return (
     <>
@@ -50,6 +81,12 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
               : "A deadline has passed. "}
             That moves the in-store date from {formatShort(planned.inStore)} to {formatShort(projected.inStore)}.
           </p>
+          {canEdit && (
+            <div className="mt-4 flex flex-col gap-2">
+              <MoveInStoreDateForm programId={program.id} date={projected.inStore} label={formatShort(projected.inStore)} />
+              {canChangeVendor && <p className="text-sm">Or keep the date and <a href="#vendor" className="font-semibold underline">choose another vendor</a> with shorter lead times.</p>}
+            </div>
+          )}
         </section>
       )}
 
@@ -117,6 +154,89 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
           </ul>
           <Link href="/settings/lead-times" className="mt-3 inline-block py-3 text-sm font-semibold underline hover:text-accent-text">See how lead times are set</Link>
         </section>
+      </div>
+
+      <div className="flex flex-wrap items-start gap-6">
+        <section id="vendor" className={`${CARD} flex min-w-0 flex-[1_1_420px] scroll-mt-6 flex-col gap-4`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-display text-xl font-bold">Vendor</h2>
+            {vendor && <span className="text-sm font-semibold">{vendor.name}</span>}
+            {vendor && open && (program.vendorState ? <StatusPill style={VENDOR_STYLES[program.vendorState]} /> : <span className="text-[13px] text-muted">No update yet</span>)}
+            {program.vendorState === "backlogged" && program.backloggedUntil && open && <span className="text-[13px] text-muted">Can start {formatShort(program.backloggedUntil)}</span>}
+          </div>
+          {!vendor && <p className="text-sm text-muted">No vendor yet. Choosing one switches the key dates to that vendor&rsquo;s lead times.</p>}
+          {vendor && open && can(role, "vendorStatus.set") && (
+            <div className="flex flex-col gap-2">
+              <h3 className="text-[11px] font-semibold tracking-wider text-muted uppercase">Log what {vendor.name} told you</h3>
+              <VendorStatusForm programId={program.id} current={program.vendorState ?? undefined} side="brand" today={today} />
+            </div>
+          )}
+          {history.length > 0 && (
+            <div>
+              <h3 className="text-[11px] font-semibold tracking-wider text-muted uppercase">Status history</h3>
+              <ul className="mt-1">
+                {history.map((event) => (
+                  <li key={event.id} className="border-b border-line py-2.5 text-sm last:border-b-0">
+                    <span className="font-semibold">{VENDOR_STYLES[event.state].label}</span>
+                    {event.expectedStart && `, can start ${formatShort(event.expectedStart)}`}
+                    <span className="text-[13px] text-muted"> · {formatStamp(event.createdAt, member.workspace.timezone)}{event.by ? ` · ${event.by}` : ""}</span>
+                    {event.note && <span className="block text-[13px]">“{event.note}”</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {canChangeVendor && (vendorChoices.length > 0
+            ? <AssignVendorForm programId={program.id} vendors={vendorChoices} current={vendor?.id} />
+            : <p className="text-sm text-muted">Add a vendor on the <Link href="/vendors" className="font-semibold text-ink underline">Vendors</Link> page first.</p>)}
+        </section>
+
+        <div className="flex min-w-0 flex-[1_1_420px] flex-col gap-6">
+          {seesProofs && (
+            <section className={`${CARD} flex flex-col gap-2`}>
+              <h2 className="font-display text-xl font-bold">Quotes and proofs</h2>
+              {!vendor ? <p className="text-sm text-muted">Choose a vendor to start sending and approving proofs.</p> : (
+                <>
+                  <ul>
+                    {approvals.map(({ kind, latest, status }) => (
+                      <li key={kind} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line py-2.5 last:border-b-0">
+                        <span className="text-sm font-semibold">{PROOF_LABELS[kind]}</span>
+                        <span className="flex flex-wrap items-center gap-3">
+                          <StatusPill style={APPROVAL_STYLES[status]} />
+                          {latest && (
+                            <Link href={`/approvals/${latest.id}`} className="inline-block py-2.5 text-[13px] font-semibold underline hover:text-accent-text">
+                              {status === "needsDecision" && can(role, "proofs.decide") ? "Review" : "Open"} version {latest.version}<span className="sr-only"> of the {PROOF_LABELS[kind].toLowerCase()}</span>
+                            </Link>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {open && sendable.length > 0 && can(role, "proofs.submit") && (
+                    <details className="rounded-[14px] border border-line">
+                      <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Add a quote or proof the vendor sent you</summary>
+                      <div className="border-t border-line p-4"><SubmitProofForm programId={program.id} kinds={sendable} /></div>
+                    </details>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
+          <section className={`${CARD} flex flex-col gap-1`}>
+            <h2 className="font-display text-xl font-bold">Guidelines</h2>
+            <GuidelineLinks items={guidelineItems} />
+            {role !== "retailerGuest" && <Link href="/guidelines" className="inline-block self-start py-2.5 text-sm font-semibold underline hover:text-accent-text">Open the guidelines library</Link>}
+          </section>
+
+          <section className={`${CARD} flex flex-col gap-1`}>
+            <h2 className="font-display text-xl font-bold">Store rollout</h2>
+            <p className="text-sm text-muted">
+              {stores.length === 0 ? "No store list yet. Add one to track shipping, delivery and installation store by store." : `${installed} of ${stores.length} ${stores.length === 1 ? "store" : "stores"} installed.`}
+            </p>
+            <Link href={`/programs/${program.id}/stores`} className="inline-block self-start py-2.5 text-sm font-semibold underline hover:text-accent-text">Open the store rollout</Link>
+          </section>
+        </div>
       </div>
     </>
   );

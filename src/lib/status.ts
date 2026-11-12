@@ -33,3 +33,21 @@ export const STAGES: { key: Stage; label: string }[] = [
   { key: "ship", label: "Ship" },
   { key: "inStore", label: "In store" },
 ];
+
+export type ApprovalStatusKey = "needsDecision" | "changesRequested" | "awaitingProof" | "approved";
+
+export const APPROVAL_STYLES: Record<ApprovalStatusKey, StatusStyle> = {
+  needsDecision: { ...VENDOR_STYLES.waitingOnYou, label: "Needs a decision" },
+  changesRequested: { ...HEALTH_STYLES.atRisk, label: "Changes requested", icon: "M2 9.5l1-3 5-5 2 2-5 5z" },
+  awaitingProof: { ...HEALTH_STYLES.notStarted, label: "Waiting for proof" },
+  approved: { ...HEALTH_STYLES.onTrack, label: "Approved" },
+};
+
+export type StoreStatusKey = "notShipped" | "shipped" | "delivered" | "installed";
+
+export const STORE_STYLES: Record<StoreStatusKey, StatusStyle> = {
+  notShipped: { ...HEALTH_STYLES.notStarted, label: "Not shipped" },
+  shipped: { ...VENDOR_STYLES.working, label: "Shipped", icon: "M1.5 6h8M6.5 3l3 3-3 3" },
+  delivered: { ...HEALTH_STYLES.complete, label: "Delivered", icon: "M2 4.5l4-2 4 2v4l-4 2-4-2z" },
+  installed: { ...HEALTH_STYLES.onTrack, label: "Installed" },
+};

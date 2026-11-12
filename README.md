@@ -13,8 +13,10 @@ Working today:
 - Lead-time profiles by vendor, origin and process that you can edit and save, with a live preview
 - Team page with invitations
 - Timeline engine and service layer with tests
+- Vendors and a vendor portal where a vendor's contact sets status in one tap
+- Quote and proof approvals with versions and comments, a timeline across programs, a guidelines library, and a store-by-store rollout tracker
 
-Not built yet: approvals and proofs, vendor portal, guidelines, in-store tracker, integrations, and the multi-step create flow. See `docs/build-brief.md` for the plan.
+Not built yet: file uploads (files are links for now), notifications, third-party integrations, and the multi-step create flow. See `docs/build-brief.md` for the plan.
 
 ## Run it
 

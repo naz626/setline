@@ -112,6 +112,87 @@ export const programs = pgTable("programs", {
   createdAt: createdAt(),
 }, (t) => [index("programs_workspace_idx").on(t.workspaceId)]);
 
+/** Every status a vendor reports, newest last. The program row keeps the current one. */
+export const vendorStatusEvents = pgTable("vendor_status_events", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  programId: text("program_id").notNull().references(() => programs.id, { onDelete: "cascade" }),
+  state: vendorStateEnum("state").notNull(),
+  note: text("note").notNull().default(""),
+  expectedStart: date("expected_start", { mode: "string" }).$type<ISODate>(),
+  setBy: text("set_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+}, (t) => [index("vendor_status_events_program_idx").on(t.programId)]);
+
+export const proofKindEnum = pgEnum("proof_kind", ["quoteApproved", "structuralProofApproved", "printProofApproved"]);
+export const proofDecisionEnum = pgEnum("proof_decision", ["approved", "changesRequested"]);
+
+/**
+ * One version of a quote or proof sent for approval. Files are links for now (see docs/build-brief.md, file storage);
+ * source says where the version came from so an integration can add versions later.
+ */
+export const proofs = pgTable("proofs", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  programId: text("program_id").notNull().references(() => programs.id, { onDelete: "cascade" }),
+  kind: proofKindEnum("kind").notNull(),
+  version: integer("version").notNull(),
+  url: text("url").notNull(),
+  note: text("note").notNull().default(""),
+  source: text("source").notNull().default("link"),
+  uploadedBy: text("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+  decision: proofDecisionEnum("decision"),
+  decisionNote: text("decision_note").notNull().default(""),
+  decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex("proofs_program_kind_version_idx").on(t.programId, t.kind, t.version)]);
+
+export const proofComments = pgTable("proof_comments", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  proofId: text("proof_id").notNull().references(() => proofs.id, { onDelete: "cascade" }),
+  authorId: text("author_id").references(() => users.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+  createdAt: createdAt(),
+}, (t) => [index("proof_comments_proof_idx").on(t.proofId)]);
+
+export const guidelineTypeEnum = pgEnum("guideline_type", ["store", "brand", "vendor"]);
+
+/** A guideline document. Store guidelines attach to programs by retailer name, vendor guidelines by vendor, brand guidelines to all. */
+export const guidelines = pgTable("guidelines", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  type: guidelineTypeEnum("type").notNull(),
+  title: text("title").notNull(),
+  retailer: text("retailer").notNull().default(""),
+  vendorId: text("vendor_id").references(() => vendors.id, { onDelete: "cascade" }),
+  reviewBy: date("review_by", { mode: "string" }).$type<ISODate>(),
+  createdAt: createdAt(),
+}, (t) => [index("guidelines_workspace_idx").on(t.workspaceId)]);
+
+export const guidelineVersions = pgTable("guideline_versions", {
+  id: id(),
+  guidelineId: text("guideline_id").notNull().references(() => guidelines.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  url: text("url").notNull(),
+  addedBy: text("added_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+}, (t) => [index("guideline_versions_guideline_idx").on(t.guidelineId)]);
+
+/** One store in a program's rollout. Each date is filled in as the display moves along. */
+export const programStores = pgTable("program_stores", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  programId: text("program_id").notNull().references(() => programs.id, { onDelete: "cascade" }),
+  storeNumber: text("store_number").notNull(),
+  location: text("location").notNull().default(""),
+  shippedOn: date("shipped_on", { mode: "string" }).$type<ISODate>(),
+  deliveredOn: date("delivered_on", { mode: "string" }).$type<ISODate>(),
+  installedOn: date("installed_on", { mode: "string" }).$type<ISODate>(),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex("program_stores_program_number_idx").on(t.programId, t.storeNumber)]);
+
 export type Role = (typeof roleEnum.enumValues)[number];
 export type UserRow = typeof users.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -120,3 +201,9 @@ export type VendorRow = typeof vendors.$inferSelect;
 export type LeadTimeProfileRow = typeof leadTimeProfiles.$inferSelect;
 export type ProgramRow = typeof programs.$inferSelect;
 export type InvitationRow = typeof invitations.$inferSelect;
+export type VendorStatusEventRow = typeof vendorStatusEvents.$inferSelect;
+export type ProofRow = typeof proofs.$inferSelect;
+export type ProofKind = (typeof proofKindEnum.enumValues)[number];
+export type GuidelineRow = typeof guidelines.$inferSelect;
+export type GuidelineType = (typeof guidelineTypeEnum.enumValues)[number];
+export type ProgramStoreRow = typeof programStores.$inferSelect;

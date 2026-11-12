@@ -4,7 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { NewProfileForm, ProfileForm } from "@/components/LeadTimeForms";
 import { LeadTimePlanner } from "@/components/LeadTimePlanner";
 import { can } from "@/lib/auth/permissions";
-import { requireMember } from "@/lib/auth/session";
+import { requireBrandMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { vendors } from "@/lib/db/schema";
 import { scopeText } from "@/lib/leadTimeScope";
@@ -13,7 +13,7 @@ import { listProfiles, toEngineProfile } from "@/lib/services/leadTimes";
 import { STEPS, STEP_LABELS } from "@/lib/timeline";
 
 async function LeadTimes() {
-  const member = await requireMember();
+  const member = await requireBrandMember();
   const db = await getDb();
   const [profileRows, vendorRows] = await Promise.all([
     listProfiles(db, member.workspace.id),
