@@ -155,6 +155,8 @@ Default milestones and durations used in the sample data. These are placeholders
 - Program files (artwork, specs, quantities, ship-to) as https links, shown to the vendor in their portal
 - An activity log on every program, written by the services in the same transaction as each change
 - Email notifications (`src/lib/services/notices.ts`, sent from `announce` in `src/app/actions.ts`): the vendor's contacts hear about a submitted program and proof decisions, the program owner hears when the vendor sets a status, and reviewers hear about a new proof. There are no per-person preferences yet.
+- Changes at any point: a new quote or proof version can be sent until the program ships (it replaces a waiting version, or reopens an approval already given). `/programs/:id` has a Changes log (`src/lib/services/changes.ts`): each change has a category and description, can reopen approvals, emails the vendor, and stays "not seen" until the vendor taps "Got it". A reopened approval takes its key date back and holds up the remaining dates in the engine.
+- Fixing mistakes: the most recent key date can be marked as not done, any completed date can be corrected, and details, the in-store date and the program's own lead times can be edited at any time. Every edit is written to the activity log with before and after values.
 
 Still not built: file upload and storage (files are links for now), pinned comments on proofs, sample-photo and retailer sign-off approvals, store photos, the retailer guest view scoped to their own programs, notification preferences and Slack or Teams alerts, CSV import for programs and vendors, the guided tour, and every third-party connection.
 

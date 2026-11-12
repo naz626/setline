@@ -142,7 +142,6 @@ describe("proofs and approvals", () => {
     await expect(submitProof(db, acmeRep, { programId, kind: "quoteApproved", url: "javascript:alert(1)", note: "" })).rejects.toThrow(/https/);
     await expect(submitProof(db, acmeRep, { programId: otherProgramId, kind: "quoteApproved", url: "https://files.test/q.pdf", note: "" })).rejects.toThrow(InputError);
     quoteId = await submitProof(db, acmeRep, { programId, kind: "quoteApproved", url: "https://files.test/quote-v1.pdf", note: "First quote" });
-    await expect(submitProof(db, acmeRep, { programId, kind: "quoteApproved", url: "https://files.test/quote-v2.pdf", note: "" })).rejects.toThrow(/still waiting/);
     const item = (await listApprovalItems(db, admin)).find((i) => i.view.program.id === programId && i.kind === "quoteApproved")!;
     expect(item.status).toBe("needsDecision");
     expect(item.latest?.version).toBe(1);
@@ -173,7 +172,6 @@ describe("proofs and approvals", () => {
     const view = (await getProgramView(db, admin, programId))!;
     expect(view.completed.quoteApproved).toBe(today);
     expect(view.next).toBe("structuralProofApproved");
-    await expect(submitProof(db, acmeRep, { programId, kind: "quoteApproved", url: "https://files.test/q3.pdf", note: "" })).rejects.toThrow(/already approved/);
   });
 
   it("lets the vendor mark production and shipping, in order only", async () => {

@@ -145,6 +145,8 @@ export const proofs = pgTable("proofs", {
   decisionNote: text("decision_note").notNull().default(""),
   decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
+  /** Set when a later change withdrew this version's approval, so the approval needs a new version. */
+  reopenedAt: timestamp("reopened_at", { withTimezone: true }),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("proofs_program_kind_version_idx").on(t.programId, t.kind, t.version)]);
 
@@ -218,6 +220,25 @@ export const activityEvents = pgTable("activity_events", {
   createdAt: createdAt(),
 }, (t) => [index("activity_events_program_idx").on(t.programId)]);
 
+export const changeCategoryEnum = pgEnum("change_category", ["artwork", "structure", "quantities", "stores", "dates", "other"]);
+
+/**
+ * A change to a program after it was submitted: what changed, which approvals it reopened,
+ * and whether the vendor has confirmed they saw it. Changes can come at any point up to shipping.
+ */
+export const programChanges = pgTable("program_changes", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  programId: text("program_id").notNull().references(() => programs.id, { onDelete: "cascade" }),
+  category: changeCategoryEnum("category").notNull(),
+  summary: text("summary").notNull(),
+  reopened: jsonb("reopened").$type<ProofKind[]>().notNull().default([]),
+  createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+  acknowledgedBy: text("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+}, (t) => [index("program_changes_program_idx").on(t.programId)]);
+
 export type Role = (typeof roleEnum.enumValues)[number];
 export type UserRow = typeof users.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -234,3 +255,5 @@ export type GuidelineType = (typeof guidelineTypeEnum.enumValues)[number];
 export type ProgramStoreRow = typeof programStores.$inferSelect;
 export type ProgramFileRow = typeof programFiles.$inferSelect;
 export type ProgramFileKind = (typeof programFileKindEnum.enumValues)[number];
+export type ProgramChangeRow = typeof programChanges.$inferSelect;
+export type ChangeCategory = (typeof changeCategoryEnum.enumValues)[number];

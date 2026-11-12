@@ -75,6 +75,20 @@ describe("resolveLeadTimes", () => {
   });
 });
 
+describe("a reopened approval", () => {
+  it("holds up the steps that remain, even when a later step was already done", () => {
+    const planned = scheduleBackward("2027-04-19", DEFAULTS);
+    // Print proof was approved and production finished, then a late change reopened the print proof.
+    const completed = { submit: "2027-02-01", quoteApproved: "2027-02-08", structuralProofApproved: "2027-02-22", productionComplete: "2027-04-05" };
+    const projected = projectForward({ planned, durations: DEFAULTS, completed, today: "2027-04-06" });
+    expect(projected.printProofApproved).toBe("2027-04-06");
+    expect(projected.productionComplete).toBe("2027-04-05");
+    expect(projected.shipped).toBe("2027-04-08");
+    expect(projected.inStore).toBe("2027-04-20");
+    expect(computeHealth({ planned, projected, completed, today: "2027-04-06", hasVendor: true })).toBe("willMiss");
+  });
+});
+
 describe("projectForward and computeHealth", () => {
   const planned = scheduleBackward("2027-04-19", DEFAULTS);
   const base = { planned, durations: DEFAULTS };

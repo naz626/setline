@@ -43,6 +43,15 @@ export const APPROVAL_STYLES: Record<ApprovalStatusKey, StatusStyle> = {
   approved: { ...HEALTH_STYLES.onTrack, label: "Approved" },
 };
 
+/** One version of a quote or proof, as opposed to the approval as a whole. */
+export const VERSION_STYLES = {
+  needsDecision: APPROVAL_STYLES.needsDecision,
+  changesRequested: APPROVAL_STYLES.changesRequested,
+  approved: APPROVAL_STYLES.approved,
+  replaced: { ...HEALTH_STYLES.notStarted, label: "Replaced" },
+  withdrawn: { ...HEALTH_STYLES.notStarted, label: "Approval withdrawn" },
+} satisfies Record<string, StatusStyle>;
+
 export type StoreStatusKey = "notShipped" | "shipped" | "delivered" | "installed";
 
 export const STORE_STYLES: Record<StoreStatusKey, StatusStyle> = {

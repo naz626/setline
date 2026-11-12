@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 import { ForbiddenError, assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { proofComments, proofKindEnum, programs, proofs, users } from "@/lib/db/schema";
@@ -18,24 +18,35 @@ export const PROOF_LABELS: Record<ProofKind, string> = {
   printProofApproved: "Print proof",
 };
 
-/** Adds the next version of a quote or proof for the brand to review. */
+/**
+ * Adds the next version of a quote or proof for the brand to review. A new version can be sent at any point
+ * until the program ships: it replaces a version that is still waiting, and if that approval was already
+ * given it reopens it, because the approved file is no longer the current one.
+ */
 export async function submitProof(db: Db, member: Member, input: { programId: string; kind: string; url: string; note: string }): Promise<string> {
   assertCan(member.membership.role, "proofs.submit");
   const program = await findVisibleProgram(db, member, input.programId);
   if (!program.vendorId) throw new InputError("Choose a vendor before sending proofs.");
   if (!(PROOF_KINDS as readonly string[]).includes(input.kind)) throw new InputError("Choose what you are sending.");
   const kind = input.kind as ProofKind;
-  if (program.completed[kind]) throw new InputError(`The ${PROOF_LABELS[kind].toLowerCase()} is already approved.`);
+  if (program.completed.shipped) throw new InputError("This program has shipped, so its proofs can no longer change.");
   const url = parseLink(input.url, "The file link");
   const [latest] = await db.select().from(proofs).where(and(eq(proofs.programId, program.id), eq(proofs.kind, kind))).orderBy(desc(proofs.version)).limit(1);
-  if (latest && !latest.decision) throw new InputError(`Version ${latest.version} is still waiting for a decision.`);
   const version = (latest?.version ?? 0) + 1;
+  const reopens = Boolean(program.completed[kind]);
   return db.transaction(async (tx) => {
     const [row] = await tx
       .insert(proofs)
       .values({ workspaceId: member.workspace.id, programId: program.id, kind, version, url, note: input.note.trim().slice(0, 1000), uploadedBy: member.user.id })
       .returning({ id: proofs.id });
-    await recordActivity(tx, member, program.id, "proofSent", `Sent the ${PROOF_LABELS[kind].toLowerCase()}, version ${version}, for approval`);
+    if (reopens) {
+      const completed = { ...program.completed };
+      delete completed[kind];
+      await tx.update(programs).set({ completed }).where(eq(programs.id, program.id));
+    }
+    const label = PROOF_LABELS[kind].toLowerCase();
+    await recordActivity(tx, member, program.id, "proofSent",
+      `Sent the ${label}, version ${version}, for approval${reopens ? `. This reopens the ${label} approval` : latest && !latest.decision ? `. It replaces version ${latest.version}` : ""}`);
     return row.id;
   });
 }
@@ -61,6 +72,9 @@ export async function decideProof(db: Db, member: Member, input: { proofId: stri
   assertCan(member.membership.role, "proofs.decide");
   const { proof, program } = await findProof(db, member, input.proofId);
   if (proof.decision) throw new InputError("This version already has a decision.");
+  const [newer] = await db.select({ version: proofs.version }).from(proofs)
+    .where(and(eq(proofs.programId, program.id), eq(proofs.kind, proof.kind), gt(proofs.version, proof.version))).orderBy(desc(proofs.version)).limit(1);
+  if (newer) throw new InputError(`Version ${newer.version} has replaced this one. Review that version instead.`);
   if (input.decision !== "approved" && input.decision !== "changesRequested") throw new InputError("Choose approve or request changes.");
   const note = input.note.trim().slice(0, 1000);
   if (input.decision === "changesRequested" && !note) throw new InputError("Say what needs to change, so the vendor can act on it.");
@@ -123,10 +137,28 @@ export interface ApprovalItem {
 
 /** Where one approval stands, from the program's progress and the latest version sent. */
 export function approvalStatus(completed: boolean, latest: ProofRow | undefined): ApprovalStatus {
-  if (completed || latest?.decision === "approved") return "approved";
   if (latest && !latest.decision) return "needsDecision";
   if (latest?.decision === "changesRequested") return "changesRequested";
+  // A change after approval withdraws it: the approval is open again and needs a new version.
+  if (latest?.reopenedAt) return "awaitingProof";
+  if (completed || latest?.decision === "approved") return "approved";
   return "awaitingProof";
+}
+
+export type VersionStatus = "needsDecision" | "changesRequested" | "approved" | "replaced" | "withdrawn";
+export const VERSION_LABELS: Record<VersionStatus, string> = {
+  needsDecision: "Needs a decision",
+  changesRequested: "Changes requested",
+  approved: "Approved",
+  replaced: "Replaced before a decision",
+  withdrawn: "Approval withdrawn by a later change",
+};
+
+/** Where one version stands. Only the newest version of a kind can still be decided. */
+export function versionStatus(proof: ProofRow, isLatest: boolean): VersionStatus {
+  if (proof.decision === "changesRequested") return "changesRequested";
+  if (proof.decision === "approved") return proof.reopenedAt || !isLatest ? "withdrawn" : "approved";
+  return isLatest ? "needsDecision" : "replaced";
 }
 
 /** Every approval on the programs this person can see that have a vendor and are not finished. */

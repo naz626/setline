@@ -6,6 +6,7 @@ import { StatusIcon, StatusPill } from "@/components/StatusPill";
 import { can } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
+import { countUnseenChanges } from "@/lib/services/changes";
 import { listProgramViews } from "@/lib/services/programs";
 import { HEALTH_STYLES, STAGES, VENDOR_STYLES } from "@/lib/status";
 import { daysBetween, formatShort } from "@/lib/timeline";
@@ -15,7 +16,8 @@ async function Programs() {
   const member = await requireMember();
   // Vendor contacts have their own home, worded from their side.
   if (member.membership.role === "vendorGuest") redirect("/vendor");
-  const views = await listProgramViews(await getDb(), member);
+  const db = await getDb();
+  const [views, unseenChanges] = await Promise.all([listProgramViews(db, member), countUnseenChanges(db, member)]);
   const today = todayInZone(member.workspace.timezone);
   const canCreate = can(member.membership.role, "programs.create");
   const waiting = views.filter((v) => v.vendorState === "waitingOnYou" && v.health !== "complete");
@@ -91,6 +93,7 @@ async function Programs() {
                         <td className="py-4 pr-4">
                           <Link href={`/programs/${view.program.id}`} className="inline-block py-1 text-[15px] font-semibold hover:text-accent-text">{view.program.name}</Link>
                           <div className="text-[13px] text-muted">{view.vendor?.name ?? "No vendor yet"}</div>
+                          {unseenChanges.get(view.program.id) ? <div className="text-[13px] font-semibold text-[#7A4B00]">{unseenChanges.get(view.program.id)} {unseenChanges.get(view.program.id) === 1 ? "change" : "changes"} not seen by the vendor</div> : null}
                         </td>
                         <td className="py-4 pr-4">
                           <div className="mb-1.5 text-[13px] font-medium">{STAGES.find((s) => s.key === view.stage)?.label}</div>

@@ -6,8 +6,8 @@ import { StatusPill } from "@/components/StatusPill";
 import { can } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
-import { PROOF_LABELS, approvalStatus, getProofDetail } from "@/lib/services/proofs";
-import { APPROVAL_STYLES } from "@/lib/status";
+import { PROOF_LABELS, getProofDetail, versionStatus } from "@/lib/services/proofs";
+import { VERSION_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
@@ -22,8 +22,9 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
   const role = member.membership.role;
   const vendorSide = role === "vendorGuest";
   const zone = member.workspace.timezone;
-  const status = approvalStatus(false, proof);
-  const style = APPROVAL_STYLES[status];
+  const isLatest = versions[0].id === proof.id;
+  const status = versionStatus(proof, isLatest);
+  const style = VERSION_STYLES[status];
   const kind = PROOF_LABELS[proof.kind];
 
   return (
@@ -70,6 +71,12 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
         <div className="flex flex-[1_1_320px] flex-col gap-6">
           <section className={`${CARD} flex flex-col gap-3`}>
             <h2 className="font-display text-xl font-bold">Decision</h2>
+            {!isLatest && (
+              <p className="rounded-[14px] bg-canvas px-4 py-3 text-sm">
+                Version {versions[0].version} has replaced this one. <Link href={`/approvals/${versions[0].id}`} className="font-semibold underline">Open the newest version</Link>
+              </p>
+            )}
+            {proof.reopenedAt && isLatest && <p className="rounded-[14px] bg-canvas px-4 py-3 text-sm">A later change reopened this approval, so it needs a new version.</p>}
             {proof.decision ? (
               <>
                 <p className="text-sm"><span className="font-semibold">{proof.decision === "approved" ? "Approved" : "Changes requested"}</span>{proof.decidedAt ? ` on ${formatStamp(proof.decidedAt, zone)}` : ""}</p>
@@ -78,6 +85,8 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
                   <p className="text-[13px] text-muted">{vendorSide ? "Send a new version from your programs page." : "The vendor can now send a new version."}</p>
                 )}
               </>
+            ) : !isLatest ? (
+              <p className="text-sm text-muted">No decision was made on this version.</p>
             ) : can(role, "proofs.decide") ? (
               <DecideProofForm proofId={proof.id} />
             ) : (
@@ -89,7 +98,7 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
             <h2 className="font-display text-xl font-bold">Versions</h2>
             <ul className="mt-2">
               {versions.map((version) => {
-                const versionStyle = APPROVAL_STYLES[approvalStatus(false, version)];
+                const versionStyle = VERSION_STYLES[versionStatus(version, version.id === versions[0].id)];
                 return (
                   <li key={version.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-line py-2 last:border-b-0">
                     {version.id === proof.id ? <span className="py-2.5 text-sm font-semibold" aria-current="page">Version {version.version} (this one)</span> : (

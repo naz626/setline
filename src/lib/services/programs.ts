@@ -8,6 +8,8 @@ import {
   MILESTONES,
   MILESTONE_LABELS,
   MILESTONE_OWNER,
+  STEPS,
+  STEP_LABELS,
   formatShort,
   computeHealth,
   computeStage,
@@ -19,7 +21,7 @@ import {
   scheduleBackward,
   toUTC,
 } from "@/lib/timeline";
-import type { Health, ISODate, LeadTimeProfile, MilestoneKey, ResolvedLeadTimes, Schedule, Stage, VendorState } from "@/lib/timeline";
+import type { Health, ISODate, LeadTimeProfile, MilestoneKey, ResolvedLeadTimes, Schedule, Stage, StepDurations, VendorState } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
 import { recordActivity } from "./activity";
 import { InputError } from "./errors";
@@ -146,18 +148,30 @@ export interface NewProgramInput {
   submitNow?: boolean;
 }
 
-export async function createProgram(db: Db, member: Member, input: NewProgramInput): Promise<string> {
-  assertCan(member.membership.role, "programs.create");
+export interface ProgramDetailsInput {
+  name: string;
+  retailer: string;
+  displayType: string;
+  storeCount: string;
+}
+
+function parseDetails(input: ProgramDetailsInput) {
   const name = input.name.trim();
   if (!name || name.length > 120) throw new InputError("Give the program a name of up to 120 characters.");
   const retailer = input.retailer.trim().slice(0, 120);
   if (!(DISPLAY_TYPES as readonly string[]).includes(input.displayType)) throw new InputError("Choose a display type.");
-  const inStoreDate = parseDate(input.inStoreDate, "The in-store date");
   let storeCount: number | null = null;
   if (input.storeCount.trim() !== "") {
     storeCount = Number(input.storeCount);
     if (!Number.isInteger(storeCount) || storeCount < 0 || storeCount > 100_000) throw new InputError("Store count must be a whole number.");
   }
+  return { name, retailer, displayType: input.displayType, storeCount };
+}
+
+export async function createProgram(db: Db, member: Member, input: NewProgramInput): Promise<string> {
+  assertCan(member.membership.role, "programs.create");
+  const { name, retailer, displayType, storeCount } = parseDetails(input);
+  const inStoreDate = parseDate(input.inStoreDate, "The in-store date");
   let vendorId: string | null = null;
   if (input.vendorId) {
     const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, input.vendorId), eq(vendors.workspaceId, member.workspace.id)));
@@ -175,7 +189,7 @@ export async function createProgram(db: Db, member: Member, input: NewProgramInp
     const [created] = await tx
       .insert(programs)
       .values({
-        workspaceId: member.workspace.id, name, retailer, displayType: input.displayType, storeCount, inStoreDate, vendorId, ownerId: member.user.id,
+        workspaceId: member.workspace.id, name, retailer, displayType, storeCount, inStoreDate, vendorId, ownerId: member.user.id,
         leadTimeOverrides, completed: input.submitNow ? { submit: today } : {},
       })
       .returning({ id: programs.id });
@@ -236,5 +250,84 @@ export async function moveInStoreDate(db: Db, member: Member, programId: string,
   await db.transaction(async (tx) => {
     await tx.update(programs).set({ inStoreDate }).where(eq(programs.id, row.id));
     await recordActivity(tx, member, row.id, "dateMoved", `Moved the in-store date from ${formatShort(row.inStoreDate)} to ${formatShort(inStoreDate)}`);
+  });
+}
+
+/** Changes a program's name, retailer, display type or store count at any point, and logs what changed. */
+export async function updateProgramDetails(db: Db, member: Member, programId: string, input: ProgramDetailsInput): Promise<void> {
+  assertCan(member.membership.role, "programs.editSchedule");
+  const row = await findVisibleProgram(db, member, programId);
+  const next = parseDetails(input);
+  const labels = { name: "name", retailer: "retailer", displayType: "display type", storeCount: "store count" } as const;
+  const changes = (Object.keys(labels) as (keyof typeof labels)[])
+    .filter((key) => next[key] !== row[key])
+    .map((key) => `${labels[key]} from “${row[key] ?? "none"}” to “${next[key] ?? "none"}”`);
+  if (changes.length === 0) return;
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set(next).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "details", `Changed the ${changes.join(", the ")}`);
+  });
+}
+
+/**
+ * Sets the lead times for this one program. A step that matches what the profiles already give is not stored,
+ * so the program keeps following the profiles for it.
+ */
+export async function updateProgramLeadTimes(db: Db, member: Member, programId: string, input: StepInput): Promise<void> {
+  assertCan(member.membership.role, "programs.editSchedule");
+  const row = await findVisibleProgram(db, member, programId);
+  const wanted = parseSteps(input, false);
+  const context = await loadContext(db, member);
+  const vendor = row.vendorId ? context.vendorById.get(row.vendorId) : undefined;
+  const scope = { vendorId: vendor?.id, origin: vendor?.origin, process: vendor?.process, displayType: row.displayType };
+  const fromProfiles = resolveLeadTimes(context.profiles, scope);
+  const before = resolveLeadTimes(context.profiles, scope, row.leadTimeOverrides);
+  const overrides: Partial<StepDurations> = {};
+  const changes: string[] = [];
+  for (const step of STEPS) {
+    const want = wanted[step];
+    if (want && (want.days !== fromProfiles[step].days || want.unit !== fromProfiles[step].unit)) overrides[step] = want;
+    const after = overrides[step] ?? fromProfiles[step];
+    if (after.days !== before[step].days || after.unit !== before[step].unit) {
+      changes.push(`${STEP_LABELS[step]} from ${before[step].days} to ${after.days} ${after.unit} days`);
+    }
+  }
+  if (changes.length === 0) return;
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ leadTimeOverrides: overrides }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "leadTimes", `Changed this program's lead times: ${changes.join(", ")}`);
+  });
+}
+
+/**
+ * Takes back the most recently completed key date, for a mistake or a step that has to be redone.
+ * Only the last one can be undone, so dates stay in order; undo again to go further back.
+ */
+export async function undoMilestone(db: Db, member: Member, programId: string, key: string): Promise<void> {
+  assertCan(member.membership.role, "programs.editSchedule");
+  const row = await findVisibleProgram(db, member, programId);
+  const last = [...MILESTONES].reverse().find((m) => row.completed[m]);
+  if (!last || last !== key) throw new InputError("Only the most recently completed date can be undone. Refresh the page and try again.");
+  const completed = { ...row.completed };
+  delete completed[last];
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ completed, verified: last === "inStore" ? false : row.verified }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "milestone", `Marked as not done: ${MILESTONE_LABELS[last]} (was done ${formatShort(row.completed[last]!)})`);
+  });
+}
+
+/** Corrects the day a key date was completed. It cannot be in the future. */
+export async function setMilestoneDate(db: Db, member: Member, programId: string, key: string, date: string): Promise<void> {
+  assertCan(member.membership.role, "programs.editSchedule");
+  const row = await findVisibleProgram(db, member, programId);
+  const milestone = MILESTONES.find((m) => m === key);
+  const was = milestone && row.completed[milestone];
+  if (!milestone || !was) throw new InputError("That date is not marked as done.");
+  const doneOn = parseDate(date, "The completion date");
+  if (doneOn > todayInZone(member.workspace.timezone)) throw new InputError("A completed date cannot be in the future.");
+  if (doneOn === was) return;
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ completed: { ...row.completed, [milestone]: doneOn } }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "milestone", `Corrected ${MILESTONE_LABELS[milestone]}: done ${formatShort(doneOn)}, not ${formatShort(was)}`);
   });
 }

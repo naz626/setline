@@ -9,6 +9,7 @@ import { ForbiddenError } from "@/lib/auth/permissions";
 import { SESSION_COOKIE, requireMember, requireUser } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { emailConfigured, sendEmail } from "@/lib/email";
+import { acknowledgeChange, logChange } from "@/lib/services/changes";
 import { InputError } from "@/lib/services/errors";
 import { addProgramFile, removeProgramFile } from "@/lib/services/files";
 import { buildNotice } from "@/lib/services/notices";
@@ -16,7 +17,7 @@ import type { NoticeEvent } from "@/lib/services/notices";
 import { createProfile, deleteProfile, updateProfile } from "@/lib/services/leadTimes";
 import type { StepInput } from "@/lib/services/leadTimes";
 import { addGuidelineVersion, createGuideline, deleteGuideline } from "@/lib/services/guidelines";
-import { assignVendor, completeNextMilestone, createProgram, moveInStoreDate } from "@/lib/services/programs";
+import { assignVendor, completeNextMilestone, createProgram, moveInStoreDate, setMilestoneDate, undoMilestone, updateProgramDetails, updateProgramLeadTimes } from "@/lib/services/programs";
 import { addProofComment, decideProof, submitProof } from "@/lib/services/proofs";
 import { addStores, markAllStores, markStore, removeStore, resetStore } from "@/lib/services/stores";
 import { inviteMember, revokeInvitation } from "@/lib/services/team";
@@ -378,4 +379,49 @@ export async function addProgramFileAction(_prev: FormState, formData: FormData)
 
 export async function removeProgramFileAction(formData: FormData): Promise<void> {
   await quietly(async (member) => removeProgramFile(await getDb(), member, text(formData, "fileId")));
+}
+
+export async function updateProgramDetailsAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await updateProgramDetails(await getDb(), member, text(formData, "programId"), {
+      name: text(formData, "name"), retailer: text(formData, "retailer"), displayType: text(formData, "displayType"), storeCount: text(formData, "storeCount"),
+    });
+    return "Saved.";
+  });
+}
+
+export async function updateProgramLeadTimesAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await updateProgramLeadTimes(await getDb(), member, text(formData, "programId"), stepInput(formData));
+    return "Lead times saved. Every key date has been counted back again.";
+  });
+}
+
+export async function undoMilestoneAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await undoMilestone(await getDb(), member, text(formData, "programId"), text(formData, "milestone"));
+    return "Marked as not done.";
+  });
+}
+
+export async function setMilestoneDateAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await setMilestoneDate(await getDb(), member, text(formData, "programId"), text(formData, "milestone"), text(formData, "date"));
+    return "Date corrected.";
+  });
+}
+
+export async function logChangeAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    const changeId = await logChange(await getDb(), member, {
+      programId: text(formData, "programId"), category: text(formData, "category"), summary: text(formData, "summary"),
+      reopen: formData.getAll("reopen").filter((value): value is string => typeof value === "string"),
+    });
+    await announce(member, { type: "changeLogged", changeId });
+    return "Change logged. The vendor will see it on their programs page.";
+  });
+}
+
+export async function acknowledgeChangeAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => acknowledgeChange(await getDb(), member, text(formData, "changeId")));
 }
