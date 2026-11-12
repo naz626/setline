@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
+import { findDatabaseUrl } from "./url";
 
 export type Db = NodePgDatabase<typeof schema>;
 
@@ -9,7 +10,7 @@ const globalForDb = globalThis as unknown as { __setlineDb?: Promise<Db> };
 
 /**
  * Returns the database.
- * With DATABASE_URL set it connects to that Postgres. Without it, development uses an embedded Postgres (PGlite)
+ * With a database connection string set (see findDatabaseUrl) it connects to that Postgres. Without it, development uses an embedded Postgres (PGlite)
  * stored in .data/, with migrations applied on start, so the app runs with no database setup.
  */
 export function getDb(): Promise<Db> {
@@ -17,7 +18,7 @@ export function getDb(): Promise<Db> {
 }
 
 async function createDb(): Promise<Db> {
-  const url = process.env.DATABASE_URL;
+  const url = findDatabaseUrl();
   if (url) {
     const { Pool } = await import("pg");
     return drizzlePg(new Pool({ connectionString: url }), { schema });
