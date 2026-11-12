@@ -35,6 +35,9 @@ function failure(error: unknown): FormState {
 
 async function baseUrl(): Promise<string> {
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  // On Vercel the platform sets these, so they are safe to trust. Previews use their own address.
+  if (process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   // Never build sign-in links from request headers in production: a forged Host header could redirect the link.
   if (process.env.NODE_ENV === "production") throw new Error("APP_URL is not set.");
   const h = await headers();

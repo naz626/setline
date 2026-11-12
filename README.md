@@ -27,7 +27,7 @@ No setup is needed for development: the app uses an embedded database in `.data/
 
 ## Deploy it
 
-Set the variables in `.env.example` (`DATABASE_URL`, `APP_URL`, `RESEND_API_KEY`, `EMAIL_FROM`), then run `npm run db:migrate` once against the database before starting the app.
+Set the variables in `.env.example`. `npm run build` applies database migrations first whenever `DATABASE_URL` is set, so a host such as Vercel creates and updates the tables on every deploy. To apply them by hand, run `npm run db:migrate`.
 
 ## Check it
 
