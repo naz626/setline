@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import { boolean, date, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import type { PlanId } from "@/lib/plans";
 import type { ISODate, MilestoneKey, StepDurations } from "@/lib/timeline";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
@@ -43,6 +45,16 @@ export const workspaces = pgTable("workspaces", {
   alertWebhookUrl: text("alert_webhook_url"),
   /** Hash of the secret in the calendar feed address. The secret itself is shown once and never stored. */
   calendarTokenHash: text("calendar_token_hash"),
+  /** What the workspace is on: a free trial, or a paid plan set when payment is confirmed. See `src/lib/plans.ts`. */
+  plan: text("plan").$type<PlanId>().notNull().default("trial"),
+  /** When the free trial ends. Only read while the plan is "trial". */
+  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }).notNull().default(sql`now() + interval '30 days'`),
+  /** The one extension a trial can have has been used. */
+  trialExtended: boolean("trial_extended").notNull().default(false),
+  /** One of the first ten brands: 50% off the first year. */
+  founding: boolean("founding").notNull().default(false),
+  /** Trial reminder emails already sent ("day20", "day28"), so each goes out once. */
+  trialReminders: jsonb("trial_reminders").$type<string[]>().notNull().default([]),
   createdAt: createdAt(),
 });
 

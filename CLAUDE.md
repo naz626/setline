@@ -21,6 +21,7 @@ Brand-side tracker for retail display programs. Read `docs/build-brief.md` first
 - Data lives in Postgres through Drizzle (`src/lib/db`). With no `DATABASE_URL`, development uses an embedded database in `.data/` and applies migrations on start.
 - All reads and writes go through `src/lib/services`. Every service takes a `Member` and scopes its queries to that workspace; changes call `assertCan` first. Do not query the database from pages or actions directly for anything a role check applies to.
 - Server actions in `src/app/actions.ts` start with `requireMember()` (or `requireUser()`), call a service, and turn `InputError`, `AuthError` and `ForbiddenError` into a form message.
+- Plans and limits live in `src/lib/plans.ts` (pure) and `src/lib/services/billing.ts`. A workspace whose trial has ended is read-only: every action that changes something must go through `attempt` or `quietly`, or call `assertWritable(member)` itself.
 - Sign-in is passwordless email links with database sessions (`src/lib/auth`). Only hashes of tokens are stored. Do not log tokens or build links from request headers in production.
 - This project has Cache Components on. Anything that reads the session must render inside a Suspense boundary; `AppShell` and `AuthShell` provide one. Follow `node_modules/next/dist/docs/01-app/02-guides/authentication-with-cache-components.md`.
 - "Today" comes from `todayInZone(workspace.timezone)`, never from a bare `new Date()` in schedule logic.

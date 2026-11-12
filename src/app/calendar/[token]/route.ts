@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db/client";
 import { listOpenProgramsForFeed } from "@/lib/services/programs";
 import { findWorkspaceByCalendarToken } from "@/lib/services/settings";
+import { PLANS } from "@/lib/plans";
 import { MILESTONES, MILESTONE_LABELS, addDays } from "@/lib/timeline";
 
 const escape = (text: string) => text.replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\r?\n/g, "\\n");
@@ -14,7 +15,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
   const { token } = await params;
   const db = await getDb();
   const workspace = await findWorkspaceByCalendarToken(db, token.replace(/\.ics$/, ""));
-  if (!workspace) return new Response("Not found", { status: 404 });
+  if (!workspace || !PLANS[workspace.plan]?.alerts) return new Response("Not found", { status: 404 });
   const views = await listOpenProgramsForFeed(db, workspace);
   const stamp = `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`;
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Setline//Key dates//EN", "CALSCALE:GREGORIAN", `X-WR-CALNAME:${escape(`Setline: ${workspace.name}`)}`];

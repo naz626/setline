@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { memberships, programChanges, programs, proofs, users, vendors } from "@/lib/db/schema";
 import type { Role } from "@/lib/db/schema";
+import { PLANS } from "@/lib/plans";
 import { formatLong, formatShort } from "@/lib/timeline";
 import type { Member } from "./member";
 import { PROOF_LABELS } from "./proofs";
@@ -125,5 +126,5 @@ export async function buildNotice(db: Db, member: Member, event: NoticeEvent): P
     const off = new Set(muted.filter((m) => m.mutedNotices.includes(event.type)).map((m) => m.email));
     unique = unique.filter((email) => !off.has(email));
   }
-  return { to: unique, subject, text, path, vendorRecipients: unique.filter((email) => contacts.includes(email)), alertWebhookUrl: member.workspace.alertWebhookUrl ?? undefined };
+  return { to: unique, subject, text, path, vendorRecipients: unique.filter((email) => contacts.includes(email)), alertWebhookUrl: (PLANS[member.workspace.plan]?.alerts && member.workspace.alertWebhookUrl) || undefined };
 }

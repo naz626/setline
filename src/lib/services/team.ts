@@ -4,6 +4,7 @@ import { assertBrand, assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { invitations, memberships, roleEnum, users, vendors } from "@/lib/db/schema";
 import type { Role } from "@/lib/db/schema";
+import { assertSeatAvailable } from "./billing";
 import { InputError } from "./errors";
 import type { Member } from "./member";
 
@@ -39,6 +40,7 @@ export async function inviteMember(db: Db, member: Member, input: { email: strin
   }
   if (!(roleEnum.enumValues as readonly string[]).includes(input.role)) throw new InputError("Choose a role.");
   const role = input.role as Role;
+  await assertSeatAvailable(db, member, role);
 
   let vendorId: string | null = null;
   if (role === "vendorGuest") {
