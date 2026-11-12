@@ -116,13 +116,30 @@ export async function findVisibleProgram(db: Db, member: Member, id: string): Pr
 }
 
 /** Links are the only kind of file for now. Only https links are kept so a link can never run script. */
-export function parseLink(value: string, label = "The link"): string {
+/** How an uploaded file is recorded in a link column: this prefix, then its path in file storage. */
+export const UPLOAD_PREFIX = "blob:";
+
+/** Where a workspace's uploads live in file storage. Nothing outside it can be attached to that workspace's records. */
+export function uploadFolder(workspaceId: string): string {
+  return `w/${workspaceId}/`;
+}
+
+/**
+ * Checks a file reference: a full https link, or an upload made by this workspace.
+ * Pass the workspace to accept uploads; without it only links are allowed.
+ */
+export function parseLink(value: string, label = "The link", workspaceId?: string): string {
   const trimmed = value.trim();
+  if (workspaceId && trimmed.startsWith(UPLOAD_PREFIX)) {
+    const path = trimmed.slice(UPLOAD_PREFIX.length);
+    if (!path.startsWith(uploadFolder(workspaceId)) || path.includes("..") || path.length > 600) throw new InputError("That upload could not be found. Upload the file again.");
+    return trimmed;
+  }
   let url: URL | undefined;
   try {
     url = new URL(trimmed);
   } catch {}
-  if (!url || url.protocol !== "https:" || trimmed.length > 2000) throw new InputError(`${label} must be a full https:// address.`);
+  if (!url || url.protocol !== "https:" || trimmed.length > 2000) throw new InputError(`${label} must be an uploaded file or a full https:// address.`);
   return url.toString();
 }
 
@@ -181,7 +198,7 @@ export async function createProgram(db: Db, member: Member, input: NewProgramInp
   const leadTimeOverrides = parseSteps(input.leadTimes ?? {}, false);
   const files = (input.files ?? []).filter((file) => file.url.trim() !== "").map((file) => {
     if (!(programFileKindEnum.enumValues as readonly string[]).includes(file.kind)) throw new InputError("Choose what kind of file this is.");
-    return { kind: file.kind as ProgramFileKind, url: parseLink(file.url, "Each file link") };
+    return { kind: file.kind as ProgramFileKind, url: parseLink(file.url, "Each file link", member.workspace.id) };
   });
   if (input.submitNow && !vendorId) throw new InputError("Choose a vendor before submitting, or save the program as a plan.");
   const today = todayInZone(member.workspace.timezone);
@@ -329,5 +346,29 @@ export async function setMilestoneDate(db: Db, member: Member, programId: string
   await db.transaction(async (tx) => {
     await tx.update(programs).set({ completed: { ...row.completed, [milestone]: doneOn } }).where(eq(programs.id, row.id));
     await recordActivity(tx, member, row.id, "milestone", `Corrected ${MILESTONE_LABELS[milestone]}: done ${formatShort(doneOn)}, not ${formatShort(was)}`);
+  });
+}
+
+/** Records the retailer's sign-off on a program. A retailer guest gives it; the brand can record it for them. */
+export async function giveRetailerSignoff(db: Db, member: Member, programId: string, note: string): Promise<void> {
+  assertCan(member.membership.role, "retailer.signoff");
+  const row = await findVisibleProgram(db, member, programId);
+  if (row.retailerApprovedAt) return;
+  const retailerNote = note.trim().slice(0, 500);
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ retailerApprovedAt: new Date(), retailerApprovedBy: member.user.id, retailerNote }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "retailer",
+      `${member.membership.role === "retailerGuest" ? "The retailer signed off" : "Recorded the retailer's sign-off"}${retailerNote ? `. “${retailerNote}”` : ""}`);
+  });
+}
+
+/** Takes the retailer's sign-off back, for example after a change the retailer has to see again. */
+export async function withdrawRetailerSignoff(db: Db, member: Member, programId: string): Promise<void> {
+  assertCan(member.membership.role, "retailer.signoff");
+  const row = await findVisibleProgram(db, member, programId);
+  if (!row.retailerApprovedAt) return;
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ retailerApprovedAt: null, retailerApprovedBy: null, retailerNote: "" }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "retailer", "Withdrew the retailer's sign-off");
   });
 }

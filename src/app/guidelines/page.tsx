@@ -12,6 +12,7 @@ import { listVendors } from "@/lib/services/vendors";
 import { HEALTH_STYLES } from "@/lib/status";
 import { formatShort } from "@/lib/timeline";
 import { formatStamp, todayInZone } from "@/lib/today";
+import { fileHref } from "@/lib/uploads";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 const APPLIES = { store: "Attached to every program for this retailer", brand: "Attached to every program", vendor: "Attached to every program with this vendor" };
@@ -69,7 +70,7 @@ async function Guidelines() {
                   <ul>
                     {versions.map((version, i) => (
                       <li key={version.id} className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line py-1.5 last:border-b-0">
-                        <a href={version.url} target="_blank" rel="noopener noreferrer" className="inline-block py-2 text-sm font-semibold underline hover:text-accent-text">
+                        <a href={fileHref("guideline", version.id, version.url)} target="_blank" rel="noopener noreferrer" className="inline-block py-2 text-sm font-semibold underline hover:text-accent-text">
                           {version.label}{i === 0 ? " (current)" : ""}<span className="sr-only"> of {guideline.title}, opens in a new tab</span>
                         </a>
                         <span className="text-[13px] text-muted">Added {formatStamp(version.createdAt, zone)}</span>

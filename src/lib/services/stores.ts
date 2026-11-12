@@ -6,7 +6,8 @@ import type { ProgramStoreRow } from "@/lib/db/schema";
 import { todayInZone } from "@/lib/today";
 import { InputError } from "./errors";
 import type { Member } from "./member";
-import { findVisibleProgram } from "./programs";
+import { recordActivity } from "./activity";
+import { findVisibleProgram, parseLink } from "./programs";
 
 export const STORE_STEPS = ["shipped", "delivered", "installed"] as const;
 export type StoreStep = (typeof STORE_STEPS)[number];
@@ -93,4 +94,48 @@ export async function resetStore(db: Db, member: Member, storeId: string): Promi
 export async function removeStore(db: Db, member: Member, storeId: string): Promise<void> {
   assertCan(member.membership.role, "stores.manage");
   await db.delete(programStores).where(and(eq(programStores.id, storeId), eq(programStores.workspaceId, member.workspace.id)));
+}
+
+async function findStore(db: Db, member: Member, storeId: string): Promise<ProgramStoreRow> {
+  const [store] = await db.select().from(programStores).where(and(eq(programStores.id, storeId), eq(programStores.workspaceId, member.workspace.id)));
+  if (!store) throw new InputError("That store is no longer on the list.");
+  // Throws for a vendor guest whose vendor is not on the program.
+  await findVisibleProgram(db, member, store.programId);
+  return store;
+}
+
+/**
+ * Adds the photo that shows the display set up in a store. A photo is the proof of installation,
+ * so it also marks the store installed (and any earlier steps) if it was not already.
+ */
+export async function setStorePhoto(db: Db, member: Member, storeId: string, photo: string): Promise<void> {
+  assertCan(member.membership.role, "stores.photo");
+  const store = await findStore(db, member, storeId);
+  const photoUrl = parseLink(photo, "The photo", member.workspace.id);
+  const steps = stepUpdate(store, "installed", todayInZone(member.workspace.timezone));
+  await db.transaction(async (tx) => {
+    await tx.update(programStores).set({ ...steps, photoUrl, photoAt: new Date(), photoBy: member.user.id }).where(eq(programStores.id, store.id));
+    await recordActivity(tx, member, store.programId, "store", `Added an install photo for store ${store.storeNumber}`);
+  });
+}
+
+/** Removes a store's photo. The install date stays; use undo to take that back. */
+export async function removeStorePhoto(db: Db, member: Member, storeId: string): Promise<void> {
+  assertCan(member.membership.role, "stores.manage");
+  const store = await findStore(db, member, storeId);
+  if (!store.photoUrl) return;
+  await db.transaction(async (tx) => {
+    await tx.update(programStores).set({ photoUrl: null, photoAt: null, photoBy: null }).where(eq(programStores.id, store.id));
+    await recordActivity(tx, member, store.programId, "store", `Removed the install photo for store ${store.storeNumber}`);
+  });
+}
+
+/** The saved photo reference for a store, if this person may see the store's program. */
+export async function findStorePhoto(db: Db, member: Member, storeId: string): Promise<string | undefined> {
+  try {
+    return (await findStore(db, member, storeId)).photoUrl ?? undefined;
+  } catch (error) {
+    if (error instanceof InputError) return undefined;
+    throw error;
+  }
 }

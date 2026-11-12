@@ -1,11 +1,11 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { assertBrand, assertCan } from "@/lib/auth/permissions";
+import { assertBrand, assertCan, isBrandRole } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
-import { guidelineTypeEnum, guidelineVersions, guidelines, vendors } from "@/lib/db/schema";
+import { guidelineTypeEnum, guidelineVersions, guidelines, programs, vendors } from "@/lib/db/schema";
 import type { GuidelineRow, GuidelineType, ProgramRow } from "@/lib/db/schema";
 import { InputError } from "./errors";
 import type { Member } from "./member";
-import { parseDate, parseLink } from "./programs";
+import { parseDate, parseLink, visibleTo } from "./programs";
 
 export const GUIDELINE_LABELS: Record<GuidelineType, string> = { store: "Store guidelines", brand: "Brand guidelines", vendor: "Vendor guidelines" };
 
@@ -87,7 +87,7 @@ export async function createGuideline(db: Db, member: Member, input: NewGuidelin
   }
   const reviewBy = input.reviewBy ? parseDate(input.reviewBy, "The review-by date") : null;
   const label = parseLabel(input.label || "v1");
-  const url = parseLink(input.url, "The file link");
+  const url = parseLink(input.url, "The file link", member.workspace.id);
   await db.transaction(async (tx) => {
     const [row] = await tx.insert(guidelines).values({ workspaceId: member.workspace.id, type, title, retailer, vendorId, reviewBy }).returning({ id: guidelines.id });
     await tx.insert(guidelineVersions).values({ guidelineId: row.id, label, url, addedBy: member.user.id });
@@ -103,11 +103,29 @@ async function findGuideline(db: Db, member: Member, id: string) {
 export async function addGuidelineVersion(db: Db, member: Member, input: { guidelineId: string; label: string; url: string }): Promise<void> {
   assertCan(member.membership.role, "guidelines.edit");
   const row = await findGuideline(db, member, input.guidelineId);
-  await db.insert(guidelineVersions).values({ guidelineId: row.id, label: parseLabel(input.label), url: parseLink(input.url, "The file link"), addedBy: member.user.id });
+  await db.insert(guidelineVersions).values({ guidelineId: row.id, label: parseLabel(input.label), url: parseLink(input.url, "The file link", member.workspace.id), addedBy: member.user.id });
 }
 
 export async function deleteGuideline(db: Db, member: Member, id: string): Promise<void> {
   assertCan(member.membership.role, "guidelines.edit");
   const row = await findGuideline(db, member, id);
   await db.delete(guidelines).where(eq(guidelines.id, row.id));
+}
+
+/**
+ * One guideline version, if this person may open it: the brand team always, a guest only when the
+ * guideline applies to a program they can see.
+ */
+export async function findGuidelineVersion(db: Db, member: Member, versionId: string) {
+  const [row] = await db.select({ version: guidelineVersions, guideline: guidelines }).from(guidelineVersions)
+    .innerJoin(guidelines, eq(guidelines.id, guidelineVersions.guidelineId))
+    .where(and(eq(guidelineVersions.id, versionId), eq(guidelines.workspaceId, member.workspace.id)));
+  if (!row) return undefined;
+  if (isBrandRole(member.membership.role)) return row.version;
+  const visible = await db.select().from(programs).where(visibleTo(member));
+  for (const program of visible) {
+    const applies = await guidelinesForProgram(db, member, program);
+    if (applies.some((item) => item.versions.some((version) => version.id === versionId))) return row.version;
+  }
+  return undefined;
 }

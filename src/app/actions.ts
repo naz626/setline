@@ -17,9 +17,9 @@ import type { NoticeEvent } from "@/lib/services/notices";
 import { createProfile, deleteProfile, updateProfile } from "@/lib/services/leadTimes";
 import type { StepInput } from "@/lib/services/leadTimes";
 import { addGuidelineVersion, createGuideline, deleteGuideline } from "@/lib/services/guidelines";
-import { assignVendor, completeNextMilestone, createProgram, moveInStoreDate, setMilestoneDate, undoMilestone, updateProgramDetails, updateProgramLeadTimes } from "@/lib/services/programs";
+import { assignVendor, completeNextMilestone, createProgram, giveRetailerSignoff, moveInStoreDate, setMilestoneDate, undoMilestone, updateProgramDetails, updateProgramLeadTimes, withdrawRetailerSignoff } from "@/lib/services/programs";
 import { addProofComment, decideProof, submitProof } from "@/lib/services/proofs";
-import { addStores, markAllStores, markStore, removeStore, resetStore } from "@/lib/services/stores";
+import { addStores, markAllStores, markStore, removeStore, resetStore, removeStorePhoto, setStorePhoto } from "@/lib/services/stores";
 import { inviteMember, revokeInvitation } from "@/lib/services/team";
 import { completeVendorMilestone, createVendor, setVendorStatus } from "@/lib/services/vendors";
 import { createWorkspace } from "@/lib/services/workspace";
@@ -424,4 +424,26 @@ export async function logChangeAction(_prev: FormState, formData: FormData): Pro
 
 export async function acknowledgeChangeAction(formData: FormData): Promise<void> {
   await quietly(async (member) => acknowledgeChange(await getDb(), member, text(formData, "changeId")));
+}
+
+export async function setStorePhotoAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await setStorePhoto(await getDb(), member, text(formData, "storeId"), text(formData, "url"));
+    return "Photo added. The store is marked installed.";
+  });
+}
+
+export async function removeStorePhotoAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => removeStorePhoto(await getDb(), member, text(formData, "storeId")));
+}
+
+export async function retailerSignoffAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await giveRetailerSignoff(await getDb(), member, text(formData, "programId"), text(formData, "note"));
+    return "Sign-off recorded.";
+  });
+}
+
+export async function withdrawRetailerSignoffAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => withdrawRetailerSignoff(await getDb(), member, text(formData, "programId")));
 }

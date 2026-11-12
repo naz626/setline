@@ -2,6 +2,9 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { signOut } from "@/app/actions";
 import { getCurrentMember } from "@/lib/auth/session";
+import { uploadFolder } from "@/lib/services/programs";
+import { uploadsConfigured } from "@/lib/uploads";
+import { UploadsProvider } from "./FileField";
 
 const BRAND_LINKS = [
   { href: "/programs", label: "Programs" },
@@ -44,6 +47,12 @@ async function NavUser() {
   );
 }
 
+/** Tells upload fields where this workspace's files go, when file storage is connected. */
+async function WithUploads({ children }: { children: React.ReactNode }) {
+  const member = uploadsConfigured() ? await getCurrentMember() : undefined;
+  return <UploadsProvider folder={member ? uploadFolder(member.workspace.id) : undefined}>{children}</UploadsProvider>;
+}
+
 function Loading() {
   return (
     <div className="flex flex-col gap-4" role="status" aria-label="Loading">
@@ -75,7 +84,7 @@ export function AppShell({ active, children }: { active: string; children: React
         </div>
       </header>
       <main className="mx-auto flex max-w-[1200px] flex-col gap-6 px-6 pt-8 pb-12">
-        <Suspense fallback={<Loading />}>{children}</Suspense>
+        <Suspense fallback={<Loading />}><WithUploads>{children}</WithUploads></Suspense>
       </main>
     </>
   );

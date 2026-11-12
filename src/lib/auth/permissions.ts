@@ -20,9 +20,16 @@ export const PERMISSIONS = {
   "changes.log": ["brandAdmin", "programManager", "designer"],
   /** Confirming a change was seen: the vendor's contact, or the brand on their behalf. */
   "changes.acknowledge": ["brandAdmin", "programManager", "vendorGuest"],
+  /** Putting a file into storage. What it can be attached to is checked separately. */
+  "files.upload": ["brandAdmin", "programManager", "designer", "reviewer", "vendorGuest", "retailerGuest"],
   "files.manage": ["brandAdmin", "programManager", "designer"],
   "guidelines.edit": ["brandAdmin", "programManager", "designer"],
   "stores.manage": ["brandAdmin", "programManager"],
+  /** Adding the photo that confirms a display is set up in a store. */
+  "stores.photo": ["brandAdmin", "programManager", "vendorGuest", "retailerGuest"],
+  /** The retailer's sign-off: the retailer's own guest, or the brand recording it for them. */
+  "retailer.signoff": ["brandAdmin", "programManager", "retailerGuest"],
+  "integrations.manage": ["brandAdmin"],
   "stores.update": ["brandAdmin", "programManager", "vendorGuest"],
 } as const satisfies Record<string, readonly Role[]>;
 

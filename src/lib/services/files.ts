@@ -33,7 +33,7 @@ export async function addProgramFile(db: Db, member: Member, input: { programId:
   assertCan(member.membership.role, "files.manage");
   const program = await findVisibleProgram(db, member, input.programId);
   const kind = parseFileKind(input.kind);
-  const url = parseLink(input.url, "The file link");
+  const url = parseLink(input.url, "The file link", member.workspace.id);
   const existing = await db.select({ id: programFiles.id }).from(programFiles).where(eq(programFiles.programId, program.id));
   if (existing.length >= MAX_FILES) throw new InputError(`A program can hold up to ${MAX_FILES} files.`);
   await db.transaction(async (tx) => {
@@ -50,4 +50,17 @@ export async function removeProgramFile(db: Db, member: Member, fileId: string):
     await tx.delete(programFiles).where(eq(programFiles.id, file.id));
     await recordActivity(tx, member, file.programId, "file", `Removed a file: ${FILE_LABELS[file.kind]}`);
   });
+}
+
+/** One file, if this person may see its program. */
+export async function findProgramFile(db: Db, member: Member, fileId: string): Promise<ProgramFileRow | undefined> {
+  const [file] = await db.select().from(programFiles).where(and(eq(programFiles.id, fileId), eq(programFiles.workspaceId, member.workspace.id)));
+  if (!file) return undefined;
+  try {
+    await findVisibleProgram(db, member, file.programId);
+  } catch (error) {
+    if (error instanceof InputError) return undefined;
+    throw error;
+  }
+  return file;
 }

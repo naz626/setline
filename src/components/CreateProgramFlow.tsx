@@ -6,6 +6,7 @@ import type { PlannerVendor } from "@/lib/leadTimeScope";
 import { DISPLAY_TYPES } from "@/lib/options";
 import { MILESTONES, MILESTONE_LABELS, STEPS, STEP_LABELS, formatLong, formatShort, resolveLeadTimes, scheduleBackward } from "@/lib/timeline";
 import type { LeadTimeProfile, StepKey } from "@/lib/timeline";
+import { FileField } from "./FileField";
 import { FIELD, FormMessage, LABEL, SubmitButton } from "./forms";
 
 const STAGES = ["Basics", "Vendor", "Files", "Dates", "Submit"] as const;
@@ -26,7 +27,8 @@ export function CreateProgramFlow({ vendors, profiles, today }: { vendors: Plann
   const [vendorId, setVendorId] = useState("");
   const [inStore, setInStore] = useState("");
   const [changed, setChanged] = useState<Partial<Record<StepKey, number>>>({});
-  const [fileCount, setFileCount] = useState(0);
+  const [filled, setFilled] = useState<string[]>([]);
+  const fileCount = filled.length;
   const form = useRef<HTMLFormElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
@@ -126,13 +128,10 @@ export function CreateProgramFlow({ vendors, profiles, today }: { vendors: Plann
 
       <fieldset {...panel(2)}>
         <legend className="sr-only">Files</legend>
-        <p className="text-sm text-muted">Paste a link to each file you have. All of these are optional and you can add them later.</p>
+        <p className="text-sm text-muted">Add each file you have. All of these are optional and you can add them later.</p>
         {FILES.map((file) => (
-          <label key={file.kind} className={LABEL}>
-            {file.label}
-            <input name={`file.${file.kind}`} type="url" pattern="https://.*" title="A full https:// address" placeholder="https://" className={FIELD}
-              onChange={(e) => setFileCount(Array.from(e.currentTarget.form?.querySelectorAll<HTMLInputElement>("input[type=url]") ?? []).filter((f) => f.value.trim()).length)} />
-          </label>
+          <FileField key={file.kind} name={`file.${file.kind}`} label={file.label}
+            onChange={(filled) => setFilled((current) => (filled ? [...new Set([...current, file.kind])] : current.filter((kind) => kind !== file.kind)))} />
         ))}
       </fieldset>
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState } from "react";
-import { addProgramFileAction, completeMilestoneAction, logChangeAction, moveInStoreDateAction, setMilestoneDateAction, undoMilestoneAction, updateProgramDetailsAction, updateProgramLeadTimesAction } from "@/app/actions";
+import { addProgramFileAction, retailerSignoffAction, completeMilestoneAction, logChangeAction, moveInStoreDateAction, setMilestoneDateAction, undoMilestoneAction, updateProgramDetailsAction, updateProgramLeadTimesAction } from "@/app/actions";
 import { DISPLAY_TYPES } from "@/lib/options";
+import { FileField } from "./FileField";
 import { FIELD, FormMessage, LABEL, SubmitButton } from "./forms";
 
 const FILE_KINDS = [["artwork", "Artwork"], ["specs", "Specs"], ["quantities", "Quantities"], ["shipTo", "Ship-to list"], ["other", "Other file"]] as const;
@@ -44,10 +45,7 @@ export function AddFileForm({ programId }: { programId: string }) {
             {FILE_KINDS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
         </label>
-        <label className={`${LABEL} flex-[2_1_240px]`}>
-          Link to the file
-          <input name="url" type="url" required placeholder="https://" className={FIELD} />
-        </label>
+        <div className="flex-[2_1_320px]"><FileField label="The file" required /></div>
         <SubmitButton variant="outline">Add file</SubmitButton>
       </div>
       <FormMessage state={state} />
@@ -188,6 +186,21 @@ export function LogChangeForm({ programId, approvals }: { programId: string; app
       )}
       <FormMessage state={state} />
       <SubmitButton className="self-start">Log the change</SubmitButton>
+    </form>
+  );
+}
+
+export function RetailerSignoffForm({ programId, own }: { programId: string; own: boolean }) {
+  const [state, action] = useActionState(retailerSignoffAction, {});
+  return (
+    <form action={action} className="flex flex-col gap-3">
+      <input type="hidden" name="programId" value={programId} />
+      <label className={LABEL}>
+        <span>Note <span className="font-normal text-muted">(optional)</span></span>
+        <input name="note" maxLength={500} placeholder={own ? "For example: approved for all regions" : "For example: approved by email on Nov 12"} className={FIELD} />
+      </label>
+      <FormMessage state={state} />
+      <SubmitButton className="self-start">{own ? "Sign off on this program" : "Record the retailer's sign-off"}</SubmitButton>
     </form>
   );
 }

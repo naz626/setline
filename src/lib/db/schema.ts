@@ -39,6 +39,10 @@ export const workspaces = pgTable("workspaces", {
   name: text("name").notNull(),
   /** IANA time zone used to decide what "today" is for deadlines. */
   timezone: text("timezone").notNull().default("America/New_York"),
+  /** A Slack or Microsoft Teams incoming-webhook address that receives alerts. */
+  alertWebhookUrl: text("alert_webhook_url"),
+  /** Hash of the secret in the calendar feed address. The secret itself is shown once and never stored. */
+  calendarTokenHash: text("calendar_token_hash"),
   createdAt: createdAt(),
 });
 
@@ -60,6 +64,8 @@ export const memberships = pgTable("memberships", {
   role: roleEnum("role").notNull(),
   /** Set for vendor guests: the one vendor whose programs they can see. */
   vendorId: text("vendor_id").references(() => vendors.id, { onDelete: "cascade" }),
+  /** Kinds of notification email this person has switched off. Everything is on by default. */
+  mutedNotices: jsonb("muted_notices").$type<string[]>().notNull().default([]),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("memberships_workspace_user_idx").on(t.workspaceId, t.userId)]);
 
@@ -105,6 +111,10 @@ export const programs = pgTable("programs", {
   completed: jsonb("completed").$type<Partial<Record<MilestoneKey, ISODate>>>().notNull().default({}),
   vendorState: vendorStateEnum("vendor_state"),
   backloggedUntil: date("backlogged_until", { mode: "string" }).$type<ISODate>(),
+  /** The retailer's sign-off on the program, given by a retailer guest or recorded by the brand. */
+  retailerApprovedAt: timestamp("retailer_approved_at", { withTimezone: true }),
+  retailerApprovedBy: text("retailer_approved_by").references(() => users.id, { onDelete: "set null" }),
+  retailerNote: text("retailer_note").notNull().default(""),
   /** True once the display is in store and confirmed. */
   verified: boolean("verified").notNull().default(false),
   /** Lead times changed for this program only. */
@@ -192,6 +202,10 @@ export const programStores = pgTable("program_stores", {
   shippedOn: date("shipped_on", { mode: "string" }).$type<ISODate>(),
   deliveredOn: date("delivered_on", { mode: "string" }).$type<ISODate>(),
   installedOn: date("installed_on", { mode: "string" }).$type<ISODate>(),
+  /** A photo of the display in the store: an upload reference or an https link. */
+  photoUrl: text("photo_url"),
+  photoAt: timestamp("photo_at", { withTimezone: true }),
+  photoBy: text("photo_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("program_stores_program_number_idx").on(t.programId, t.storeNumber)]);
 
