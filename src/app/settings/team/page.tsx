@@ -3,13 +3,13 @@ import { revokeInviteAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { InviteForm } from "@/components/TeamForms";
 import { ROLE_LABELS, ROLE_SUMMARY, can } from "@/lib/auth/permissions";
-import { requireMember } from "@/lib/auth/session";
+import { requireBrandMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { vendors } from "@/lib/db/schema";
 import { listMembers, listPendingInvitations } from "@/lib/services/team";
 
 async function Team() {
-  const member = await requireMember();
+  const member = await requireBrandMember();
   const db = await getDb();
   const canInvite = can(member.membership.role, "members.invite");
   const [members, invitations, vendorRows] = await Promise.all([

@@ -11,8 +11,12 @@ import { emailConfigured, sendEmail } from "@/lib/email";
 import { InputError } from "@/lib/services/errors";
 import { createProfile, deleteProfile, updateProfile } from "@/lib/services/leadTimes";
 import type { StepInput } from "@/lib/services/leadTimes";
-import { completeNextMilestone, createProgram } from "@/lib/services/programs";
+import { addGuidelineVersion, createGuideline, deleteGuideline } from "@/lib/services/guidelines";
+import { assignVendor, completeNextMilestone, createProgram, moveInStoreDate } from "@/lib/services/programs";
+import { addProofComment, decideProof, submitProof } from "@/lib/services/proofs";
+import { addStores, markAllStores, markStore, removeStore, resetStore } from "@/lib/services/stores";
 import { inviteMember, revokeInvitation } from "@/lib/services/team";
+import { completeVendorMilestone, createVendor, setVendorStatus } from "@/lib/services/vendors";
 import { createWorkspace } from "@/lib/services/workspace";
 import { STEPS } from "@/lib/timeline";
 
@@ -197,4 +201,134 @@ export async function revokeInviteAction(formData: FormData): Promise<void> {
   const member = await requireMember();
   await revokeInvitation(await getDb(), member, text(formData, "id"));
   refresh();
+}
+
+/** For one-tap buttons with no message area: expected problems (a stale page, a role change) just reload the page. */
+async function quietly(run: (member: Awaited<ReturnType<typeof requireMember>>) => Promise<unknown>): Promise<void> {
+  const member = await requireMember();
+  try {
+    await run(member);
+  } catch (error) {
+    failure(error);
+  }
+  refresh();
+}
+
+/** Runs a change and reports the result to the form. */
+async function attempt(run: (member: Awaited<ReturnType<typeof requireMember>>) => Promise<string | void>): Promise<FormState> {
+  const member = await requireMember();
+  try {
+    const message = await run(member);
+    refresh();
+    return message ? { message } : {};
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function createVendorAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await createVendor(await getDb(), member, { name: text(formData, "name"), makes: text(formData, "makes"), origin: text(formData, "origin"), process: text(formData, "process") });
+    return "Vendor added. Invite their contact so they can update status themselves.";
+  });
+}
+
+export async function assignVendorAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await assignVendor(await getDb(), member, text(formData, "programId"), text(formData, "vendorId"));
+    return "Vendor saved. The key dates now use this vendor's lead times.";
+  });
+}
+
+export async function setVendorStatusAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await setVendorStatus(await getDb(), member, {
+      programId: text(formData, "programId"),
+      state: text(formData, "state"),
+      note: text(formData, "note"),
+      expectedStart: text(formData, "expectedStart"),
+    });
+    return "Status updated.";
+  });
+}
+
+export async function completeVendorMilestoneAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await completeVendorMilestone(await getDb(), member, text(formData, "programId"), text(formData, "milestone"));
+  });
+}
+
+export async function submitProofAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await submitProof(await getDb(), member, { programId: text(formData, "programId"), kind: text(formData, "kind"), url: text(formData, "url"), note: text(formData, "note") });
+    return "Sent for approval.";
+  });
+}
+
+export async function decideProofAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await decideProof(await getDb(), member, { proofId: text(formData, "proofId"), decision: text(formData, "decision"), note: text(formData, "note") });
+  });
+}
+
+export async function addProofCommentAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await addProofComment(await getDb(), member, text(formData, "proofId"), text(formData, "body"));
+  });
+}
+
+export async function createGuidelineAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await createGuideline(await getDb(), member, {
+      type: text(formData, "type"),
+      title: text(formData, "title"),
+      retailer: text(formData, "retailer"),
+      vendorId: text(formData, "vendorId"),
+      reviewBy: text(formData, "reviewBy"),
+      label: text(formData, "label"),
+      url: text(formData, "url"),
+    });
+    return "Guideline added.";
+  });
+}
+
+export async function addGuidelineVersionAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await addGuidelineVersion(await getDb(), member, { guidelineId: text(formData, "guidelineId"), label: text(formData, "label"), url: text(formData, "url") });
+    return "New version added.";
+  });
+}
+
+export async function deleteGuidelineAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => deleteGuideline(await getDb(), member, text(formData, "id")));
+}
+
+export async function addStoresAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    const { added, skipped } = await addStores(await getDb(), member, text(formData, "programId"), text(formData, "stores"));
+    return `${added} ${added === 1 ? "store" : "stores"} added${skipped ? `, ${skipped} already on the list` : ""}.`;
+  });
+}
+
+export async function markStoreAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => markStore(await getDb(), member, text(formData, "storeId"), text(formData, "step")));
+}
+
+export async function markAllStoresAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => markAllStores(await getDb(), member, text(formData, "programId"), text(formData, "step")));
+}
+
+export async function resetStoreAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => resetStore(await getDb(), member, text(formData, "storeId")));
+}
+
+export async function removeStoreAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => removeStore(await getDb(), member, text(formData, "storeId")));
+}
+
+export async function moveInStoreDateAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await moveInStoreDate(await getDb(), member, text(formData, "programId"), text(formData, "inStoreDate"));
+    return "In-store date moved. Every key date has been counted back from the new date.";
+  });
 }

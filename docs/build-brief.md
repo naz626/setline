@@ -144,6 +144,14 @@ Default milestones and durations used in the sample data. These are placeholders
 - Passwordless email sign-in with database sessions, workspaces, invitations, and the six roles checked on the server (`src/lib/auth`, `src/lib/services`)
 - `/programs`, `/programs/new`, `/programs/:id` (with "mark done" on the next key date), `/settings/lead-times` (saved edits), `/settings/team`
 - New workspaces can start with sample programs placed around today's date
+- Vendors: `/vendors` (add vendors, invite contacts, see status by vendor) and the vendor portal at `/vendor` with one-tap status, status history, and "mark done" for production and shipping. Vendor guests are sent to `/vendor` from every brand screen.
+- Approvals: quote, structural proof and print proof versions as https links, approve or request changes, comments, the `/approvals` board and `/approvals/:id` review. Approving the next approval completes that key date.
+- `/timeline` across open programs, with "move the in-store date" and "choose another vendor" on a late program's page
+- `/guidelines` library with versions. Store guidelines attach by retailer name, vendor guidelines by vendor, brand guidelines to every program.
+- `/programs/:id/stores`: paste a store list, then mark shipped, delivered and installed per store or all at once
+- `/settings/integrations`: an honest list of what works today (pasted store lists, file links) and which connections are planned. Nothing connects yet.
+
+Still not built: file upload and storage (files are links for now), pinned comments on proofs, sample-photo and retailer sign-off approvals, store photos, the retailer guest view scoped to their own programs, email notifications and the activity feed, CSV import for programs and vendors, the 5-step create flow, the guided tour, and every third-party connection.
 
 Decisions made while building, which differ from the first draft of this brief:
 
@@ -215,6 +223,7 @@ Phase 3:
 - The real numbers for the workspace default and each vendor, origin and process profile
 - Whether a program can be submitted while a required item (for example ship-to details) is missing
 - Whether vendor guest access is free
-- How retailer guidelines attach automatically when a retailer is chosen
+- Retailer guidelines attach by matching the retailer name on the program. Decide whether retailers should become their own records.
+- Retailer guests can currently see every program in the workspace (but no proofs). Decide how they are assigned to programs.
 - Hosting, database host, email sender address and file storage choices
 - The name Setline still needs trademark and domain clearance

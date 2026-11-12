@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { normalizeEmail } from "@/lib/auth/core";
-import { assertCan } from "@/lib/auth/permissions";
+import { assertBrand, assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { invitations, memberships, roleEnum, users, vendors } from "@/lib/db/schema";
 import type { Role } from "@/lib/db/schema";
@@ -8,6 +8,7 @@ import { InputError } from "./errors";
 import type { Member } from "./member";
 
 export async function listMembers(db: Db, member: Member) {
+  assertBrand(member.membership.role);
   return db
     .select({ id: memberships.id, role: memberships.role, email: users.email, userId: users.id, vendorName: vendors.name })
     .from(memberships)
@@ -28,7 +29,8 @@ export async function listPendingInvitations(db: Db, member: Member) {
 
 /** Invites someone by email. They join with this role the first time they sign in with that address. */
 export async function inviteMember(db: Db, member: Member, input: { email: string; role: string; vendorId: string }): Promise<{ email: string }> {
-  assertCan(member.membership.role, "members.invite");
+  // Program managers run vendor relationships, so they may invite a vendor's contact, but nobody else.
+  assertCan(member.membership.role, input.role === "vendorGuest" ? "vendors.manage" : "members.invite");
   let email: string;
   try {
     email = normalizeEmail(input.email);

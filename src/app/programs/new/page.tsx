@@ -4,12 +4,12 @@ import { asc, eq } from "drizzle-orm";
 import { AppShell } from "@/components/AppShell";
 import { NewProgramForm } from "@/components/ProgramForms";
 import { can } from "@/lib/auth/permissions";
-import { requireMember } from "@/lib/auth/session";
+import { requireBrandMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { vendors } from "@/lib/db/schema";
 
 async function NewProgram() {
-  const member = await requireMember();
+  const member = await requireBrandMember();
   if (!can(member.membership.role, "programs.create")) redirect("/programs");
   const db = await getDb();
   const vendorRows = await db.select({ id: vendors.id, name: vendors.name }).from(vendors).where(eq(vendors.workspaceId, member.workspace.id)).orderBy(asc(vendors.name));

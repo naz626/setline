@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { completeMilestoneAction, createProgramAction } from "@/app/actions";
+import { completeMilestoneAction, createProgramAction, moveInStoreDateAction } from "@/app/actions";
 import { DISPLAY_TYPES } from "@/lib/options";
 import { FIELD, FormMessage, LABEL, SubmitButton } from "./forms";
 
@@ -60,6 +60,19 @@ export function CompleteMilestoneForm({ programId, milestone, label }: { program
       <input type="hidden" name="programId" value={programId} />
       <input type="hidden" name="milestone" value={milestone} />
       <SubmitButton className="h-11 px-4 text-[13px]">Mark done today<span className="sr-only">: {label}</span></SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+/** One of the two answers to a late program: accept the projected date. */
+export function MoveInStoreDateForm({ programId, date, label }: { programId: string; date: string; label: string }) {
+  const [state, action] = useActionState(moveInStoreDateAction, {});
+  return (
+    <form action={action} className="flex flex-col gap-2">
+      <input type="hidden" name="programId" value={programId} />
+      <input type="hidden" name="inStoreDate" value={date} />
+      <SubmitButton className="self-start">Move in-store date to {label}</SubmitButton>
       <FormMessage state={state} />
     </form>
   );

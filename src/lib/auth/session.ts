@@ -39,3 +39,11 @@ export async function requireMember(): Promise<Member> {
   if (!member) redirect("/welcome");
   return member;
 }
+
+/** For screens that belong to the brand's own team. Guests are sent to the one place they can use. */
+export async function requireBrandMember(): Promise<Member> {
+  const member = await requireMember();
+  if (member.membership.role === "vendorGuest") redirect("/vendor");
+  if (member.membership.role === "retailerGuest") redirect("/programs");
+  return member;
+}

@@ -3,18 +3,42 @@ import { Suspense } from "react";
 import { signOut } from "@/app/actions";
 import { getCurrentMember } from "@/lib/auth/session";
 
-const LINKS = [
+const BRAND_LINKS = [
   { href: "/programs", label: "Programs" },
+  { href: "/timeline", label: "Timeline" },
+  { href: "/approvals", label: "Approvals" },
+  { href: "/vendors", label: "Vendors" },
+  { href: "/guidelines", label: "Guidelines" },
   { href: "/settings/lead-times", label: "Lead times" },
   { href: "/settings/team", label: "Team" },
+  { href: "/settings/integrations", label: "Integrations" },
 ];
+const VENDOR_LINKS = [
+  { href: "/vendor", label: "Your programs" },
+  { href: "/approvals", label: "Proofs" },
+];
+const RETAILER_LINKS = [{ href: "/programs", label: "Programs" }];
+
+/** The links depend on the person's role, so they stream in with the session. */
+async function NavLinks({ active }: { active: string }) {
+  const member = await getCurrentMember();
+  if (!member) return null;
+  const role = member.membership.role;
+  const links = role === "vendorGuest" ? VENDOR_LINKS : role === "retailerGuest" ? RETAILER_LINKS : BRAND_LINKS;
+  return links.map((link) => (
+    <Link key={link.href} href={link.href} aria-current={active === link.href ? "page" : undefined}
+      className={`rounded-[10px] px-3 py-3 ${active === link.href ? "bg-canvas font-semibold text-ink" : "text-muted hover:text-accent-text"}`}>
+      {link.label}
+    </Link>
+  ));
+}
 
 async function NavUser() {
   const member = await getCurrentMember();
   if (!member) return null;
   return (
-    <form action={signOut} className="flex items-center gap-3">
-      <span className="hidden text-[13px] text-muted sm:inline">{member.workspace.name} · {member.user.email}</span>
+    <form action={signOut} className="ml-auto flex items-center gap-3">
+      <span className="hidden text-[13px] text-muted 2xl:inline">{member.workspace.name} · {member.user.email}</span>
       <button type="submit" className="h-11 rounded-[10px] border-[1.5px] border-ink px-3.5 text-[13px] font-semibold">Sign out</button>
     </form>
   );
@@ -40,13 +64,10 @@ export function AppShell({ active, children }: { active: string; children: React
             <span className="h-3 w-3 rounded-full bg-accent" aria-hidden="true" />
             <span className="font-display text-[22px] font-bold tracking-tight">setline</span>
           </Link>
-          <nav className="flex flex-1 flex-wrap gap-1 text-sm font-medium">
-            {LINKS.map((link) => (
-              <Link key={link.href} href={link.href} aria-current={active === link.href ? "page" : undefined}
-                className={`rounded-[10px] px-3.5 py-3 ${active === link.href ? "bg-canvas font-semibold text-ink" : "text-muted hover:text-accent-text"}`}>
-                {link.label}
-              </Link>
-            ))}
+          <nav aria-label="Main" className="order-last flex w-full flex-wrap gap-1 text-sm font-medium lg:order-none lg:w-auto lg:flex-1">
+            <Suspense fallback={null}>
+              <NavLinks active={active} />
+            </Suspense>
           </nav>
           <Suspense fallback={null}>
             <NavUser />

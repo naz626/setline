@@ -67,7 +67,7 @@ export function buildProgramView(program: ProgramRow, vendor: VendorRow | undefi
 }
 
 /** Vendor guests only ever see their own vendor's programs. Everyone else sees the whole workspace. */
-function visibleTo(member: Member) {
+export function visibleTo(member: Member) {
   const inWorkspace = eq(programs.workspaceId, member.workspace.id);
   if (member.membership.role !== "vendorGuest") return inWorkspace;
   // A vendor guest with no vendor attached sees nothing.
@@ -100,6 +100,24 @@ export async function getProgramView(db: Db, member: Member, id: string): Promis
   const [[row], context] = await Promise.all([db.select().from(programs).where(and(visibleTo(member), eq(programs.id, id))), loadContext(db, member)]);
   if (!row) return undefined;
   return buildProgramView(row, row.vendorId ? context.vendorById.get(row.vendorId) : undefined, context.profiles, context.today);
+}
+
+/** The program row if this person may see it. Use before any change that hangs off a program. */
+export async function findVisibleProgram(db: Db, member: Member, id: string): Promise<ProgramRow> {
+  const [row] = await db.select().from(programs).where(and(visibleTo(member), eq(programs.id, id)));
+  if (!row) throw new InputError("That program no longer exists.");
+  return row;
+}
+
+/** Links are the only kind of file for now. Only https links are kept so a link can never run script. */
+export function parseLink(value: string, label = "The link"): string {
+  const trimmed = value.trim();
+  let url: URL | undefined;
+  try {
+    url = new URL(trimmed);
+  } catch {}
+  if (!url || url.protocol !== "https:" || trimmed.length > 2000) throw new InputError(`${label} must be a full https:// address.`);
+  return url.toString();
 }
 
 export function parseDate(value: string, label: string): ISODate {
@@ -161,4 +179,26 @@ export async function completeNextMilestone(db: Db, member: Member, programId: s
     .update(programs)
     .set({ completed: { ...row.completed, [next]: today }, verified: next === "inStore" ? true : row.verified })
     .where(eq(programs.id, row.id));
+}
+
+/** Chooses or changes the vendor. Dates are recalculated from that vendor's lead times the next time the program is read. */
+export async function assignVendor(db: Db, member: Member, programId: string, vendorId: string): Promise<void> {
+  assertCan(member.membership.role, "programs.editSchedule");
+  const row = await findVisibleProgram(db, member, programId);
+  const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, vendorId), eq(vendors.workspaceId, member.workspace.id)));
+  if (!vendor) throw new InputError("Pick a vendor from your list.");
+  if (row.completed.productionComplete) throw new InputError("Production is already complete, so the vendor can no longer change.");
+  if (row.vendorId === vendor.id) return;
+  // The old vendor's status does not carry over to the new one.
+  await db.update(programs).set({ vendorId: vendor.id, vendorState: null, backloggedUntil: null }).where(eq(programs.id, row.id));
+}
+
+/** Moves the target in-store date. Every key date is counted back from the new date the next time the program is read. */
+export async function moveInStoreDate(db: Db, member: Member, programId: string, date: string): Promise<void> {
+  assertCan(member.membership.role, "programs.editSchedule");
+  const row = await findVisibleProgram(db, member, programId);
+  if (row.completed.inStore) throw new InputError("This program is already in store.");
+  const inStoreDate = parseDate(date, "The in-store date");
+  if (inStoreDate < todayInZone(member.workspace.timezone)) throw new InputError("The in-store date cannot be in the past.");
+  await db.update(programs).set({ inStoreDate }).where(eq(programs.id, row.id));
 }
