@@ -193,6 +193,31 @@ export const programStores = pgTable("program_stores", {
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("program_stores_program_number_idx").on(t.programId, t.storeNumber)]);
 
+export const programFileKindEnum = pgEnum("program_file_kind", ["artwork", "specs", "quantities", "shipTo", "other"]);
+
+/** A file the vendor needs for a program. Links for now, like proofs; source lets an integration add files later. */
+export const programFiles = pgTable("program_files", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  programId: text("program_id").notNull().references(() => programs.id, { onDelete: "cascade" }),
+  kind: programFileKindEnum("kind").notNull(),
+  url: text("url").notNull(),
+  source: text("source").notNull().default("link"),
+  addedBy: text("added_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+}, (t) => [index("program_files_program_idx").on(t.programId)]);
+
+/** What happened on a program, in plain words, newest last. Written by the services alongside each change. */
+export const activityEvents = pgTable("activity_events", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  programId: text("program_id").notNull().references(() => programs.id, { onDelete: "cascade" }),
+  actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+  type: text("type").notNull(),
+  summary: text("summary").notNull(),
+  createdAt: createdAt(),
+}, (t) => [index("activity_events_program_idx").on(t.programId)]);
+
 export type Role = (typeof roleEnum.enumValues)[number];
 export type UserRow = typeof users.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -207,3 +232,5 @@ export type ProofKind = (typeof proofKindEnum.enumValues)[number];
 export type GuidelineRow = typeof guidelines.$inferSelect;
 export type GuidelineType = (typeof guidelineTypeEnum.enumValues)[number];
 export type ProgramStoreRow = typeof programStores.$inferSelect;
+export type ProgramFileRow = typeof programFiles.$inferSelect;
+export type ProgramFileKind = (typeof programFileKindEnum.enumValues)[number];

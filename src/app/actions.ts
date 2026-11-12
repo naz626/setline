@@ -3,12 +3,16 @@
 import { refresh } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { AuthError, LOGIN_TOKEN_MINUTES, consumeLoginToken, createLoginToken, deleteSession } from "@/lib/auth/core";
 import { ForbiddenError } from "@/lib/auth/permissions";
 import { SESSION_COOKIE, requireMember, requireUser } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { emailConfigured, sendEmail } from "@/lib/email";
 import { InputError } from "@/lib/services/errors";
+import { addProgramFile, removeProgramFile } from "@/lib/services/files";
+import { buildNotice } from "@/lib/services/notices";
+import type { NoticeEvent } from "@/lib/services/notices";
 import { createProfile, deleteProfile, updateProfile } from "@/lib/services/leadTimes";
 import type { StepInput } from "@/lib/services/leadTimes";
 import { addGuidelineVersion, createGuideline, deleteGuideline } from "@/lib/services/guidelines";
@@ -46,6 +50,27 @@ async function baseUrl(): Promise<string> {
   if (process.env.NODE_ENV === "production") throw new Error("APP_URL is not set.");
   const h = await headers();
   return `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
+}
+
+/**
+ * Emails the people who should hear about a change, after the response has gone out.
+ * A notification that cannot be sent never fails the change that caused it.
+ */
+async function announce(member: Awaited<ReturnType<typeof requireMember>>, event: NoticeEvent): Promise<void> {
+  if (!emailConfigured()) return;
+  const base = await baseUrl();
+  after(async () => {
+    try {
+      const notice = await buildNotice(await getDb(), member, event);
+      if (!notice) return;
+      const results = await Promise.allSettled(notice.to.map((to) =>
+        sendEmail({ to, subject: notice.subject, text: `${notice.text}\n\n${base}${notice.vendorRecipients.includes(to) ? notice.path.vendor : notice.path.brand}\n\nSent by Setline for ${member.workspace.name}.` })));
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) console.error(`Setline: ${failed} of ${results.length} notification emails could not be sent (${event.type}).`);
+    } catch (error) {
+      console.error("Setline: a notification could not be prepared.", error);
+    }
+  });
 }
 
 export async function requestSignInLink(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -105,8 +130,11 @@ export async function createWorkspaceAction(_prev: FormState, formData: FormData
   redirect("/programs");
 }
 
+const FILE_FIELDS = ["artwork", "specs", "quantities", "shipTo"] as const;
+
 export async function createProgramAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const member = await requireMember();
+  const submitNow = text(formData, "intent") === "submit";
   let id: string;
   try {
     id = await createProgram(await getDb(), member, {
@@ -116,10 +144,14 @@ export async function createProgramAction(_prev: FormState, formData: FormData):
       storeCount: text(formData, "storeCount"),
       inStoreDate: text(formData, "inStoreDate"),
       vendorId: text(formData, "vendorId"),
+      leadTimes: stepInput(formData),
+      files: FILE_FIELDS.map((kind) => ({ kind, url: text(formData, `file.${kind}`) })),
+      submitNow,
     });
   } catch (error) {
     return failure(error);
   }
+  if (submitNow) await announce(member, { type: "submittedToVendor", programId: id });
   redirect(`/programs/${id}`);
 }
 
@@ -130,6 +162,7 @@ export async function completeMilestoneAction(_prev: FormState, formData: FormDa
   } catch (error) {
     return failure(error);
   }
+  if (text(formData, "milestone") === "submit") await announce(member, { type: "submittedToVendor", programId: text(formData, "programId") });
   refresh();
   return {};
 }
@@ -248,6 +281,7 @@ export async function setVendorStatusAction(_prev: FormState, formData: FormData
       note: text(formData, "note"),
       expectedStart: text(formData, "expectedStart"),
     });
+    await announce(member, { type: "vendorStatus", programId: text(formData, "programId") });
     return "Status updated.";
   });
 }
@@ -260,7 +294,8 @@ export async function completeVendorMilestoneAction(_prev: FormState, formData: 
 
 export async function submitProofAction(_prev: FormState, formData: FormData): Promise<FormState> {
   return attempt(async (member) => {
-    await submitProof(await getDb(), member, { programId: text(formData, "programId"), kind: text(formData, "kind"), url: text(formData, "url"), note: text(formData, "note") });
+    const proofId = await submitProof(await getDb(), member, { programId: text(formData, "programId"), kind: text(formData, "kind"), url: text(formData, "url"), note: text(formData, "note") });
+    await announce(member, { type: "proofSent", proofId });
     return "Sent for approval.";
   });
 }
@@ -268,6 +303,7 @@ export async function submitProofAction(_prev: FormState, formData: FormData): P
 export async function decideProofAction(_prev: FormState, formData: FormData): Promise<FormState> {
   return attempt(async (member) => {
     await decideProof(await getDb(), member, { proofId: text(formData, "proofId"), decision: text(formData, "decision"), note: text(formData, "note") });
+    await announce(member, { type: "proofDecided", proofId: text(formData, "proofId") });
   });
 }
 
@@ -331,4 +367,15 @@ export async function moveInStoreDateAction(_prev: FormState, formData: FormData
     await moveInStoreDate(await getDb(), member, text(formData, "programId"), text(formData, "inStoreDate"));
     return "In-store date moved. Every key date has been counted back from the new date.";
   });
+}
+
+export async function addProgramFileAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await addProgramFile(await getDb(), member, { programId: text(formData, "programId"), kind: text(formData, "kind"), url: text(formData, "url") });
+    return "File added.";
+  });
+}
+
+export async function removeProgramFileAction(formData: FormData): Promise<void> {
+  await quietly(async (member) => removeProgramFile(await getDb(), member, text(formData, "fileId")));
 }

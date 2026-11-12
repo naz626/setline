@@ -7,6 +7,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { VendorMilestoneForm, VendorStatusForm } from "@/components/VendorForms";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
+import { FILE_LABELS, listProgramFiles } from "@/lib/services/files";
 import { guidelinesForProgram } from "@/lib/services/guidelines";
 import { listProgramViews } from "@/lib/services/programs";
 import type { ProgramView } from "@/lib/services/programs";
@@ -30,7 +31,7 @@ function nextUp(view: ProgramView): string {
 async function ProgramCard({ view, member }: { view: ProgramView; member: Member }) {
   const db = await getDb();
   const { program, next, completed, today } = view;
-  const [proofRows, guidelineItems] = await Promise.all([listProofsForProgram(db, member, program.id), guidelinesForProgram(db, member, program)]);
+  const [proofRows, guidelineItems, files] = await Promise.all([listProofsForProgram(db, member, program.id), guidelinesForProgram(db, member, program), listProgramFiles(db, member, program.id)]);
   const approvals = PROOF_KINDS.map((kind) => {
     const latest = proofRows.find((p) => p.kind === kind);
     return { kind, latest, status: approvalStatus(Boolean(completed[kind]), latest) };
@@ -84,6 +85,21 @@ async function ProgramCard({ view, member }: { view: ProgramView; member: Member
             <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Send a quote or proof</summary>
             <div className="border-t border-line p-4"><SubmitProofForm programId={program.id} kinds={sendable} /></div>
           </details>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-1">
+        <h3 className="font-display text-lg font-bold">Files from the brand</h3>
+        {files.length === 0 ? <p className="text-sm text-muted">No files yet.</p> : (
+          <ul>
+            {files.map((file) => (
+              <li key={file.id} className="border-b border-line py-1 last:border-b-0">
+                <a href={file.url} target="_blank" rel="noopener noreferrer" className="inline-block py-2.5 text-sm font-semibold underline hover:text-accent-text">
+                  {FILE_LABELS[file.kind]}<span className="sr-only"> for {program.name} (opens in a new tab)</span>
+                </a>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 

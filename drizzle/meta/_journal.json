@@ -15,6 +15,13 @@
       "when": 1794491998945,
       "tag": "0001_sparkling_naoko",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794495081405,
+      "tag": "0002_amusing_chronomancer",
+      "breakpoints": true
     }
   ]
 }

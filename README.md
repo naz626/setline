@@ -16,7 +16,9 @@ Working today:
 - Vendors and a vendor portal where a vendor's contact sets status in one tap
 - Quote and proof approvals with versions and comments, a timeline across programs, a guidelines library, and a store-by-store rollout tracker
 
-Not built yet: file uploads (files are links for now), notifications, third-party integrations, and the multi-step create flow. See `docs/build-brief.md` for the plan.
+- A five-step create flow, program files as links, an activity log per program, and email notifications
+
+Not built yet: file uploads (files are links for now), notification preferences, and third-party integrations. See `docs/build-brief.md` for the plan.
 
 ## Run it
 

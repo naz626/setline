@@ -3,9 +3,11 @@ import { assertBrand, assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { invitations, memberships, originEnum, programs, users, vendorStateEnum, vendorStatusEvents, vendors } from "@/lib/db/schema";
 import { PROCESSES } from "@/lib/options";
-import { nextMilestone } from "@/lib/timeline";
+import { MILESTONE_LABELS, formatShort, nextMilestone } from "@/lib/timeline";
+import type { MilestoneKey } from "@/lib/timeline";
 import type { Origin, VendorState } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
+import { recordActivity } from "./activity";
 import { InputError } from "./errors";
 import type { Member } from "./member";
 import { findVisibleProgram, parseDate } from "./programs";
@@ -50,6 +52,8 @@ export async function createVendor(db: Db, member: Member, input: NewVendorInput
   return row.id;
 }
 
+export const STATE_WORDS: Record<VendorState, string> = { working: "Working", waitingOnYou: "Waiting on the brand", backlogged: "Backlogged" };
+
 export interface VendorStatusInput {
   programId: string;
   state: string;
@@ -78,6 +82,7 @@ export async function setVendorStatus(db: Db, member: Member, input: VendorStatu
   await db.transaction(async (tx) => {
     await tx.insert(vendorStatusEvents).values({ workspaceId: member.workspace.id, programId: program.id, state, note, expectedStart, setBy: member.user.id });
     await tx.update(programs).set({ vendorState: state, backloggedUntil: expectedStart }).where(eq(programs.id, program.id));
+    await recordActivity(tx, member, program.id, "vendorStatus", `Vendor status: ${STATE_WORDS[state]}${expectedStart ? `, can start ${formatShort(expectedStart)}` : ""}${note ? `. “${note}”` : ""}`);
   });
 }
 
@@ -102,5 +107,8 @@ export async function completeVendorMilestone(db: Db, member: Member, programId:
   if (!(VENDOR_MILESTONES as readonly string[]).includes(key) || next !== key) {
     throw new InputError("That step is not the next one. Refresh the page and try again.");
   }
-  await db.update(programs).set({ completed: { ...program.completed, [key]: todayInZone(member.workspace.timezone) } }).where(eq(programs.id, program.id));
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ completed: { ...program.completed, [key]: todayInZone(member.workspace.timezone) } }).where(eq(programs.id, program.id));
+    await recordActivity(tx, member, program.id, "milestone", `Completed: ${MILESTONE_LABELS[key as MilestoneKey]}`);
+  });
 }

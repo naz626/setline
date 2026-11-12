@@ -3,8 +3,9 @@ import { ForbiddenError, assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { proofComments, proofKindEnum, programs, proofs, users } from "@/lib/db/schema";
 import type { ProofKind, ProofRow } from "@/lib/db/schema";
-import { nextMilestone } from "@/lib/timeline";
+import { MILESTONE_LABELS, nextMilestone } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
+import { recordActivity } from "./activity";
 import { InputError } from "./errors";
 import type { Member } from "./member";
 import { findVisibleProgram, listProgramViews, parseLink } from "./programs";
@@ -28,11 +29,15 @@ export async function submitProof(db: Db, member: Member, input: { programId: st
   const url = parseLink(input.url, "The file link");
   const [latest] = await db.select().from(proofs).where(and(eq(proofs.programId, program.id), eq(proofs.kind, kind))).orderBy(desc(proofs.version)).limit(1);
   if (latest && !latest.decision) throw new InputError(`Version ${latest.version} is still waiting for a decision.`);
-  const [row] = await db
-    .insert(proofs)
-    .values({ workspaceId: member.workspace.id, programId: program.id, kind, version: (latest?.version ?? 0) + 1, url, note: input.note.trim().slice(0, 1000), uploadedBy: member.user.id })
-    .returning({ id: proofs.id });
-  return row.id;
+  const version = (latest?.version ?? 0) + 1;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(proofs)
+      .values({ workspaceId: member.workspace.id, programId: program.id, kind, version, url, note: input.note.trim().slice(0, 1000), uploadedBy: member.user.id })
+      .returning({ id: proofs.id });
+    await recordActivity(tx, member, program.id, "proofSent", `Sent the ${PROOF_LABELS[kind].toLowerCase()}, version ${version}, for approval`);
+    return row.id;
+  });
 }
 
 function assertSeesProofs(member: Member): void {
@@ -61,9 +66,13 @@ export async function decideProof(db: Db, member: Member, input: { proofId: stri
   if (input.decision === "changesRequested" && !note) throw new InputError("Say what needs to change, so the vendor can act on it.");
   await db.transaction(async (tx) => {
     await tx.update(proofs).set({ decision: input.decision as "approved" | "changesRequested", decisionNote: note, decidedBy: member.user.id, decidedAt: new Date() }).where(eq(proofs.id, proof.id));
-    if (input.decision === "approved" && nextMilestone(program.completed) === proof.kind) {
+    const completes = input.decision === "approved" && nextMilestone(program.completed) === proof.kind;
+    if (completes) {
       await tx.update(programs).set({ completed: { ...program.completed, [proof.kind]: todayInZone(member.workspace.timezone) } }).where(eq(programs.id, program.id));
     }
+    const label = `${PROOF_LABELS[proof.kind].toLowerCase()}, version ${proof.version}`;
+    await recordActivity(tx, member, program.id, "proofDecided",
+      input.decision === "approved" ? `Approved the ${label}${completes ? `. Completed: ${MILESTONE_LABELS[proof.kind]}` : ""}` : `Requested changes to the ${label}. “${note}”`);
   });
 }
 

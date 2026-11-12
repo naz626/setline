@@ -17,6 +17,7 @@ export const PERMISSIONS = {
   "proofs.submit": ["brandAdmin", "programManager", "designer", "vendorGuest"],
   "proofs.decide": ["brandAdmin", "programManager", "reviewer"],
   "proofs.comment": ["brandAdmin", "programManager", "designer", "reviewer", "vendorGuest"],
+  "files.manage": ["brandAdmin", "programManager", "designer"],
   "guidelines.edit": ["brandAdmin", "programManager", "designer"],
   "stores.manage": ["brandAdmin", "programManager"],
   "stores.update": ["brandAdmin", "programManager", "vendorGuest"],

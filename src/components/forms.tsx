@@ -11,10 +11,10 @@ const BUTTONS = {
   outline: "border-[1.5px] border-ink text-ink",
 };
 
-export function SubmitButton({ children, variant = "ink", className = "" }: { children: React.ReactNode; variant?: keyof typeof BUTTONS; className?: string }) {
+export function SubmitButton({ children, variant = "ink", className = "", name, value }: { children: React.ReactNode; variant?: keyof typeof BUTTONS; className?: string; name?: string; value?: string }) {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" disabled={pending} className={`h-12 rounded-xl px-5 text-sm font-semibold disabled:opacity-60 ${BUTTONS[variant]} ${className}`}>
+    <button type="submit" name={name} value={value} disabled={pending} className={`h-12 rounded-xl px-5 text-sm font-semibold disabled:opacity-60 ${BUTTONS[variant]} ${className}`}>
       {pending ? "Working…" : children}
     </button>
   );
