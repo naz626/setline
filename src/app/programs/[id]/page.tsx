@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { removeProgramFileAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { GuidelineLinks } from "@/components/Guidelines";
-import { CompleteMilestoneForm, MoveInStoreDateForm } from "@/components/ProgramForms";
+import { AddFileForm, CompleteMilestoneForm, MoveInStoreDateForm } from "@/components/ProgramForms";
 import { SubmitProofForm } from "@/components/ProofForms";
 import { AssignVendorForm, VendorStatusForm } from "@/components/VendorForms";
 import { StatusPill } from "@/components/StatusPill";
-import { can } from "@/lib/auth/permissions";
+import { can, isBrandRole } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
+import { listActivity } from "@/lib/services/activity";
+import { FILE_LABELS, listProgramFiles } from "@/lib/services/files";
 import { guidelinesForProgram } from "@/lib/services/guidelines";
 import { getProgramView } from "@/lib/services/programs";
 import { PROOF_KINDS, PROOF_LABELS, approvalStatus, listProofsForProgram } from "@/lib/services/proofs";
@@ -31,13 +34,16 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
 
   const canEdit = can(role, "programs.editSchedule");
   const seesProofs = can(role, "proofs.view");
-  const [proofRows, guidelineItems, stores, history, vendorList] = await Promise.all([
+  const [proofRows, guidelineItems, stores, history, vendorList, files, activity] = await Promise.all([
     seesProofs ? listProofsForProgram(db, member, id) : [],
     guidelinesForProgram(db, member, view.program),
     listStores(db, member, id),
     listStatusHistory(db, member, id),
     canEdit ? listVendors(db, member) : [],
+    listProgramFiles(db, member, id),
+    isBrandRole(role) ? listActivity(db, member, view.program) : [],
   ]);
+  const canFiles = can(role, "files.manage");
 
   const { program, vendor, planned, projected, completed, next, health, vendorState, leadTimes, today } = view;
   const healthStyle = HEALTH_STYLES[health];
@@ -223,6 +229,36 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
             </section>
           )}
 
+          <section className={`${CARD} flex flex-col gap-2`}>
+            <h2 className="font-display text-xl font-bold">Files for the vendor</h2>
+            {files.length === 0 ? <p className="text-sm text-muted">No files yet. Link the artwork, specs, quantities and ship-to list so the vendor has what they need.</p> : (
+              <ul>
+                {files.map((file) => (
+                  <li key={file.id} className="flex flex-wrap items-center justify-between gap-x-3 border-b border-line py-1.5 last:border-b-0">
+                    <a href={file.url} target="_blank" rel="noopener noreferrer" className="inline-block py-2 text-sm font-semibold underline hover:text-accent-text">
+                      {FILE_LABELS[file.kind]}<span className="sr-only"> (opens in a new tab)</span>
+                    </a>
+                    <span className="flex items-center gap-3">
+                      <span className="max-w-[220px] truncate text-[13px] text-muted">{new URL(file.url).hostname}</span>
+                      {canFiles && (
+                        <form action={removeProgramFileAction}>
+                          <input type="hidden" name="fileId" value={file.id} />
+                          <button type="submit" className="h-11 rounded-[10px] border-[1.5px] border-control px-3 text-[13px] font-semibold text-muted">Remove<span className="sr-only"> {FILE_LABELS[file.kind]}</span></button>
+                        </form>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canFiles && (
+              <details className="rounded-[14px] border border-line">
+                <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Add a file</summary>
+                <div className="border-t border-line p-4"><AddFileForm programId={program.id} /></div>
+              </details>
+            )}
+          </section>
+
           <section className={`${CARD} flex flex-col gap-1`}>
             <h2 className="font-display text-xl font-bold">Guidelines</h2>
             <GuidelineLinks items={guidelineItems} />
@@ -238,6 +274,20 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
           </section>
         </div>
       </div>
+
+      {activity.length > 0 && (
+        <section className={CARD}>
+          <h2 className="font-display text-xl font-bold">Activity</h2>
+          <ol className="mt-2">
+            {activity.map((event) => (
+              <li key={event.id} className="flex flex-wrap items-baseline justify-between gap-x-4 border-b border-line py-2.5 last:border-b-0">
+                <span className="text-sm">{event.summary}</span>
+                <span className="text-[13px] text-muted">{formatStamp(event.createdAt, member.workspace.timezone)}{event.by ? ` · ${event.by}` : ""}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </>
   );
 }

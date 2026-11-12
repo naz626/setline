@@ -151,7 +151,12 @@ Default milestones and durations used in the sample data. These are placeholders
 - `/programs/:id/stores`: paste a store list, then mark shipped, delivered and installed per store or all at once
 - `/settings/integrations`: an honest list of what works today (pasted store lists, file links) and which connections are planned. Nothing connects yet.
 
-Still not built: file upload and storage (files are links for now), pinned comments on proofs, sample-photo and retailer sign-off approvals, store photos, the retailer guest view scoped to their own programs, email notifications and the activity feed, CSV import for programs and vendors, the 5-step create flow, the guided tour, and every third-party connection.
+- `/programs/new` is a five-step flow (basics, vendor, files, dates, submit) with a live key-date preview and lead times that can be changed for that one program. A program saved as a plan stays hidden from the vendor until it is submitted.
+- Program files (artwork, specs, quantities, ship-to) as https links, shown to the vendor in their portal
+- An activity log on every program, written by the services in the same transaction as each change
+- Email notifications (`src/lib/services/notices.ts`, sent from `announce` in `src/app/actions.ts`): the vendor's contacts hear about a submitted program and proof decisions, the program owner hears when the vendor sets a status, and reviewers hear about a new proof. There are no per-person preferences yet.
+
+Still not built: file upload and storage (files are links for now), pinned comments on proofs, sample-photo and retailer sign-off approvals, store photos, the retailer guest view scoped to their own programs, notification preferences and Slack or Teams alerts, CSV import for programs and vendors, the guided tour, and every third-party connection.
 
 Decisions made while building, which differ from the first draft of this brief:
 

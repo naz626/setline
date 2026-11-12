@@ -1,12 +1,14 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
-import { programs, vendors } from "@/lib/db/schema";
-import type { ProgramRow, VendorRow } from "@/lib/db/schema";
+import { programFileKindEnum, programFiles, programs, vendors } from "@/lib/db/schema";
+import type { ProgramFileKind, ProgramRow, VendorRow } from "@/lib/db/schema";
 import { DISPLAY_TYPES } from "@/lib/options";
 import {
   MILESTONES,
+  MILESTONE_LABELS,
   MILESTONE_OWNER,
+  formatShort,
   computeHealth,
   computeStage,
   effectiveVendorState,
@@ -19,8 +21,10 @@ import {
 } from "@/lib/timeline";
 import type { Health, ISODate, LeadTimeProfile, MilestoneKey, ResolvedLeadTimes, Schedule, Stage, VendorState } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
+import { recordActivity } from "./activity";
 import { InputError } from "./errors";
-import { listProfiles, toEngineProfile } from "./leadTimes";
+import { listProfiles, parseSteps, toEngineProfile } from "./leadTimes";
+import type { StepInput } from "./leadTimes";
 import type { Member } from "./member";
 
 export interface ProgramView {
@@ -66,12 +70,12 @@ export function buildProgramView(program: ProgramRow, vendor: VendorRow | undefi
   };
 }
 
-/** Vendor guests only ever see their own vendor's programs. Everyone else sees the whole workspace. */
+/** Vendor guests only ever see their own vendor's programs, and only once they are submitted. Everyone else sees the whole workspace. */
 export function visibleTo(member: Member) {
   const inWorkspace = eq(programs.workspaceId, member.workspace.id);
   if (member.membership.role !== "vendorGuest") return inWorkspace;
   // A vendor guest with no vendor attached sees nothing.
-  return and(inWorkspace, eq(programs.vendorId, member.membership.vendorId ?? ""));
+  return and(inWorkspace, eq(programs.vendorId, member.membership.vendorId ?? ""), sql`${programs.completed} ->> 'submit' is not null`);
 }
 
 async function loadContext(db: Db, member: Member) {
@@ -134,6 +138,12 @@ export interface NewProgramInput {
   storeCount: string;
   inStoreDate: string;
   vendorId: string;
+  /** Lead times changed for this one program. Blank steps keep the profile's number. */
+  leadTimes?: StepInput;
+  /** Links to the files the vendor needs. Blank links are skipped. */
+  files?: { kind: string; url: string }[];
+  /** Marks "Submit to vendor" done today, which starts the clock. Needs a vendor. */
+  submitNow?: boolean;
 }
 
 export async function createProgram(db: Db, member: Member, input: NewProgramInput): Promise<string> {
@@ -154,11 +164,27 @@ export async function createProgram(db: Db, member: Member, input: NewProgramInp
     if (!vendor) throw new InputError("Pick a vendor from your list, or leave it for later.");
     vendorId = vendor.id;
   }
-  const [created] = await db
-    .insert(programs)
-    .values({ workspaceId: member.workspace.id, name, retailer, displayType: input.displayType, storeCount, inStoreDate, vendorId, ownerId: member.user.id })
-    .returning({ id: programs.id });
-  return created.id;
+  const leadTimeOverrides = parseSteps(input.leadTimes ?? {}, false);
+  const files = (input.files ?? []).filter((file) => file.url.trim() !== "").map((file) => {
+    if (!(programFileKindEnum.enumValues as readonly string[]).includes(file.kind)) throw new InputError("Choose what kind of file this is.");
+    return { kind: file.kind as ProgramFileKind, url: parseLink(file.url, "Each file link") };
+  });
+  if (input.submitNow && !vendorId) throw new InputError("Choose a vendor before submitting, or save the program as a plan.");
+  const today = todayInZone(member.workspace.timezone);
+  return db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(programs)
+      .values({
+        workspaceId: member.workspace.id, name, retailer, displayType: input.displayType, storeCount, inStoreDate, vendorId, ownerId: member.user.id,
+        leadTimeOverrides, completed: input.submitNow ? { submit: today } : {},
+      })
+      .returning({ id: programs.id });
+    if (files.length > 0) {
+      await tx.insert(programFiles).values(files.map((file) => ({ ...file, workspaceId: member.workspace.id, programId: created.id, addedBy: member.user.id })));
+    }
+    await recordActivity(tx, member, created.id, "created", `Created the program${input.submitNow ? " and submitted it to the vendor" : ""}, in store ${formatShort(inStoreDate)}`);
+    return created.id;
+  });
 }
 
 /**
@@ -175,10 +201,13 @@ export async function completeNextMilestone(db: Db, member: Member, programId: s
   }
   if (next !== "submit" && !row.vendorId) throw new InputError("Choose a vendor before completing this date.");
   const today = todayInZone(member.workspace.timezone);
-  await db
-    .update(programs)
-    .set({ completed: { ...row.completed, [next]: today }, verified: next === "inStore" ? true : row.verified })
-    .where(eq(programs.id, row.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(programs)
+      .set({ completed: { ...row.completed, [next]: today }, verified: next === "inStore" ? true : row.verified })
+      .where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "milestone", `Completed: ${MILESTONE_LABELS[next]}`);
+  });
 }
 
 /** Chooses or changes the vendor. Dates are recalculated from that vendor's lead times the next time the program is read. */
@@ -190,7 +219,10 @@ export async function assignVendor(db: Db, member: Member, programId: string, ve
   if (row.completed.productionComplete) throw new InputError("Production is already complete, so the vendor can no longer change.");
   if (row.vendorId === vendor.id) return;
   // The old vendor's status does not carry over to the new one.
-  await db.update(programs).set({ vendorId: vendor.id, vendorState: null, backloggedUntil: null }).where(eq(programs.id, row.id));
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ vendorId: vendor.id, vendorState: null, backloggedUntil: null }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "vendorAssigned", `${row.vendorId ? "Changed the vendor to" : "Chose the vendor"} ${vendor.name}`);
+  });
 }
 
 /** Moves the target in-store date. Every key date is counted back from the new date the next time the program is read. */
@@ -200,5 +232,9 @@ export async function moveInStoreDate(db: Db, member: Member, programId: string,
   if (row.completed.inStore) throw new InputError("This program is already in store.");
   const inStoreDate = parseDate(date, "The in-store date");
   if (inStoreDate < todayInZone(member.workspace.timezone)) throw new InputError("The in-store date cannot be in the past.");
-  await db.update(programs).set({ inStoreDate }).where(eq(programs.id, row.id));
+  if (inStoreDate === row.inStoreDate) return;
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ inStoreDate }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "dateMoved", `Moved the in-store date from ${formatShort(row.inStoreDate)} to ${formatShort(inStoreDate)}`);
+  });
 }
