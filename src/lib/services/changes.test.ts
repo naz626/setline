@@ -211,3 +211,50 @@ describe("fixing mistakes and editing", () => {
     await expect(updateProgramLeadTimes(db, rep, id, steps)).rejects.toThrow(ForbiddenError);
   });
 });
+
+describe("uploads, install photos and retailer sign-off", () => {
+  let id: string;
+  let retailer: Member;
+
+  it("accepts an upload only from the workspace's own folder", async () => {
+    id = await submitted("Uploads");
+    const mine = `blob:w/${admin.workspace.id}/abc/proof.pdf`;
+    const proofId = await submitProof(db, rep, { programId: id, kind: "quoteApproved", url: mine, note: "" });
+    expect((await getProofDetail(db, admin, proofId))!.proof.url).toBe(mine);
+    await expect(submitProof(db, rep, { programId: id, kind: "quoteApproved", url: "blob:w/another-workspace/abc/x.pdf", note: "" })).rejects.toThrow(/Upload the file again/);
+    await expect(submitProof(db, rep, { programId: id, kind: "quoteApproved", url: `blob:w/${admin.workspace.id}/../x.pdf`, note: "" })).rejects.toThrow(InputError);
+  });
+
+  it("marks a store installed when its photo is added, and guards who sees it", async () => {
+    await inviteMember(db, admin, { email: "buyer@retailer.test", role: "retailerGuest", vendorId: "" });
+    retailer = await memberFor("buyer@retailer.test");
+    const { addStores, findStorePhoto, listStores, removeStorePhoto, setStorePhoto, storeStep } = await import("./stores");
+    await addStores(db, admin, id, "101, Austin TX\n102, Dallas TX");
+    const [first, second] = await listStores(db, admin, id);
+    await setStorePhoto(db, retailer, first.id, "https://photos.test/101.jpg");
+    await setStorePhoto(db, rep, second.id, `blob:w/${admin.workspace.id}/p/102.jpg`);
+    const stores = await listStores(db, admin, id);
+    expect(stores.map((s) => storeStep(s))).toEqual(["installed", "installed"]);
+    expect(stores[0].shippedOn).toBe(today);
+    expect(await findStorePhoto(db, rep, second.id)).toContain("102.jpg");
+    expect(await findStorePhoto(db, otherRep, second.id)).toBeUndefined();
+    await expect(setStorePhoto(db, otherRep, first.id, "https://photos.test/x.jpg")).rejects.toThrow(InputError);
+    await expect(setStorePhoto(db, reviewer, first.id, "https://photos.test/x.jpg")).rejects.toThrow(ForbiddenError);
+    await expect(removeStorePhoto(db, rep, first.id)).rejects.toThrow(ForbiddenError);
+    await removeStorePhoto(db, admin, first.id);
+    expect(await findStorePhoto(db, admin, first.id)).toBeUndefined();
+  });
+
+  it("records and withdraws the retailer's sign-off", async () => {
+    const { giveRetailerSignoff, withdrawRetailerSignoff } = await import("./programs");
+    await expect(giveRetailerSignoff(db, rep, id, "")).rejects.toThrow(ForbiddenError);
+    await expect(giveRetailerSignoff(db, designer, id, "")).rejects.toThrow(ForbiddenError);
+    await giveRetailerSignoff(db, retailer, id, "Approved for all regions");
+    expect((await view(id)).program).toMatchObject({ retailerNote: "Approved for all regions" });
+    expect((await view(id)).program.retailerApprovedAt).not.toBeNull();
+    await withdrawRetailerSignoff(db, admin, id);
+    expect((await view(id)).program.retailerApprovedAt).toBeNull();
+    const program = await findVisibleProgram(db, admin, id);
+    expect((await listActivity(db, admin, program)).filter((a) => a.type === "retailer")).toHaveLength(2);
+  });
+});

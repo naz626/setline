@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { addProofCommentAction, decideProofAction, submitProofAction } from "@/app/actions";
+import { FileField } from "./FileField";
 import { FIELD, FormMessage, LABEL, SubmitButton } from "./forms";
 
 export function SubmitProofForm({ programId, kinds }: { programId: string; kinds: { id: string; label: string }[] }) {
@@ -16,10 +17,7 @@ export function SubmitProofForm({ programId, kinds }: { programId: string; kinds
             {kinds.map((kind) => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
           </select>
         </label>
-        <label className={`${LABEL} flex-[2_1_260px]`}>
-          Link to the file
-          <input name="url" type="url" required placeholder="https://" className={FIELD} />
-        </label>
+        <div className="flex-[2_1_320px]"><FileField label="The file" required /></div>
       </div>
       <label className={LABEL}>
         <span>Note <span className="font-normal text-muted">(optional)</span></span>

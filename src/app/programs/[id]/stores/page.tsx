@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { markAllStoresAction, markStoreAction, removeStoreAction, resetStoreAction } from "@/app/actions";
+import { markAllStoresAction, markStoreAction, removeStoreAction, removeStorePhotoAction, resetStoreAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { StatusIcon, StatusPill } from "@/components/StatusPill";
-import { AddStoresForm } from "@/components/StoreForms";
+import { AddStoresForm, StorePhotoForm } from "@/components/StoreForms";
 import { can } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
@@ -13,6 +13,7 @@ import type { StoreStep } from "@/lib/services/stores";
 import { STORE_STYLES } from "@/lib/status";
 import type { StoreStatusKey } from "@/lib/status";
 import { formatLong, formatShort } from "@/lib/timeline";
+import { fileHref } from "@/lib/uploads";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 const SMALL = "h-11 rounded-[10px] px-3.5 text-[13px] font-semibold";
@@ -28,6 +29,8 @@ async function Stores({ params }: { params: Promise<{ id: string }> }) {
   const role = member.membership.role;
   const canManage = can(role, "stores.manage");
   const canUpdate = can(role, "stores.update");
+  const canPhoto = can(role, "stores.photo");
+  const withPhoto = stores.filter((s) => s.photoUrl).length;
   const vendorSide = role === "vendorGuest";
   const count = (key: StoreStatusKey) => stores.filter((s) => (storeStep(s) ?? "notShipped") === key).length;
   const rank = (step: StoreStep | undefined) => (step ? STORE_STEPS.indexOf(step) : -1);
@@ -51,7 +54,7 @@ async function Stores({ params }: { params: Promise<{ id: string }> }) {
           <section className={CARD} aria-label="Progress">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="font-display text-xl font-bold">{installed} of {stores.length} {stores.length === 1 ? "store" : "stores"} installed</h2>
-              <span className="text-[13px] text-muted">{Math.round((installed / stores.length) * 100)}%</span>
+              <span className="text-[13px] text-muted">{Math.round((installed / stores.length) * 100)}% · {withPhoto} with a photo</span>
             </div>
             <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-line" aria-hidden="true">
               {(["installed", "delivered", "shipped"] as const).map((key) => (
@@ -121,6 +124,27 @@ async function Stores({ params }: { params: Promise<{ id: string }> }) {
                         </form>
                       )}
                     </div>
+                    {(store.photoUrl || canPhoto) && (
+                      <div className="flex w-full flex-wrap items-center gap-3">
+                        {store.photoUrl && (
+                          <a href={fileHref("store", store.id, store.photoUrl)} target="_blank" rel="noopener noreferrer" className="inline-block py-2.5 text-[13px] font-semibold underline hover:text-accent-text">
+                            See the install photo<span className="sr-only"> for store {store.storeNumber} (opens in a new tab)</span>
+                          </a>
+                        )}
+                        {store.photoUrl && canManage && (
+                          <form action={removeStorePhotoAction}>
+                            <input type="hidden" name="storeId" value={store.id} />
+                            <button type="submit" className={`${SMALL} border-[1.5px] border-control text-muted`}>Remove photo<span className="sr-only"> for store {store.storeNumber}</span></button>
+                          </form>
+                        )}
+                        {canPhoto && (
+                          <details className="min-w-0 flex-[1_1_100%] rounded-[14px] border border-line">
+                            <summary className="cursor-pointer px-4 py-3 text-[13px] font-semibold">{store.photoUrl ? "Replace the photo" : "Add an install photo"}<span className="sr-only"> for store {store.storeNumber}</span></summary>
+                            <div className="border-t border-line p-4"><StorePhotoForm storeId={store.id} storeNumber={store.storeNumber} /></div>
+                          </details>
+                        )}
+                      </div>
+                    )}
                   </li>
                 );
               })}

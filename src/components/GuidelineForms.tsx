@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { addGuidelineVersionAction, createGuidelineAction } from "@/app/actions";
+import { FileField } from "./FileField";
 import { FIELD, FormMessage, LABEL, SubmitButton } from "./forms";
 
 export function NewGuidelineForm({ vendors, retailers }: { vendors: { id: string; name: string }[]; retailers: string[] }) {
@@ -40,10 +41,7 @@ export function NewGuidelineForm({ vendors, retailers }: { vendors: { id: string
         )}
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <label className={`${LABEL} flex-[2_1_260px]`}>
-          Link to the file
-          <input name="url" type="url" required placeholder="https://" className={FIELD} />
-        </label>
+        <div className="flex-[2_1_320px]"><FileField label="The file" required /></div>
         <label className={`${LABEL} flex-[1_1_130px]`}>
           Version label
           <input name="label" defaultValue="v1" required maxLength={40} className={FIELD} />
@@ -69,10 +67,7 @@ export function AddVersionForm({ guidelineId, title }: { guidelineId: string; ti
           <span>New version label <span className="sr-only">for {title}</span></span>
           <input name="label" required maxLength={40} placeholder="v2" className={FIELD} />
         </label>
-        <label className={`${LABEL} flex-[2_1_240px]`}>
-          Link to the file
-          <input name="url" type="url" required placeholder="https://" className={FIELD} />
-        </label>
+        <div className="flex-[2_1_320px]"><FileField label="The file" required /></div>
         <SubmitButton variant="outline">Add version</SubmitButton>
       </div>
       <FormMessage state={state} />

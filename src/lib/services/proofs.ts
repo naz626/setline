@@ -30,7 +30,7 @@ export async function submitProof(db: Db, member: Member, input: { programId: st
   if (!(PROOF_KINDS as readonly string[]).includes(input.kind)) throw new InputError("Choose what you are sending.");
   const kind = input.kind as ProofKind;
   if (program.completed.shipped) throw new InputError("This program has shipped, so its proofs can no longer change.");
-  const url = parseLink(input.url, "The file link");
+  const url = parseLink(input.url, "The file link", member.workspace.id);
   const [latest] = await db.select().from(proofs).where(and(eq(proofs.programId, program.id), eq(proofs.kind, kind))).orderBy(desc(proofs.version)).limit(1);
   const version = (latest?.version ?? 0) + 1;
   const reopens = Boolean(program.completed[kind]);

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { acknowledgeChangeAction, removeProgramFileAction } from "@/app/actions";
+import { acknowledgeChangeAction, removeProgramFileAction, withdrawRetailerSignoffAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { GuidelineLinks } from "@/components/Guidelines";
-import { AddFileForm, ChangeInStoreDateForm, CompleteMilestoneForm, EditDetailsForm, EditMilestoneForm, LogChangeForm, MoveInStoreDateForm, ProgramLeadTimesForm } from "@/components/ProgramForms";
+import { AddFileForm, ChangeInStoreDateForm, CompleteMilestoneForm, EditDetailsForm, EditMilestoneForm, LogChangeForm, MoveInStoreDateForm, ProgramLeadTimesForm, RetailerSignoffForm } from "@/components/ProgramForms";
 import { SubmitProofForm } from "@/components/ProofForms";
 import { AssignVendorForm, VendorStatusForm } from "@/components/VendorForms";
 import { StatusPill } from "@/components/StatusPill";
@@ -20,6 +20,7 @@ import { listStores, storeStep } from "@/lib/services/stores";
 import { listStatusHistory, listVendors } from "@/lib/services/vendors";
 import { APPROVAL_STYLES, HEALTH_STYLES, STAGES, VENDOR_STYLES, VERSION_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
+import { fileHref, fileSource } from "@/lib/uploads";
 import { MILESTONES, MILESTONE_LABELS, MILESTONE_OWNER, STEPS, STEP_LABELS, daysBetween, formatLong, formatShort } from "@/lib/timeline";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
@@ -327,11 +328,11 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
               <ul>
                 {files.map((file) => (
                   <li key={file.id} className="flex flex-wrap items-center justify-between gap-x-3 border-b border-line py-1.5 last:border-b-0">
-                    <a href={file.url} target="_blank" rel="noopener noreferrer" className="inline-block py-2 text-sm font-semibold underline hover:text-accent-text">
+                    <a href={fileHref("program", file.id, file.url)} target="_blank" rel="noopener noreferrer" className="inline-block py-2 text-sm font-semibold underline hover:text-accent-text">
                       {FILE_LABELS[file.kind]}<span className="sr-only"> (opens in a new tab)</span>
                     </a>
                     <span className="flex items-center gap-3">
-                      <span className="max-w-[220px] truncate text-[13px] text-muted">{new URL(file.url).hostname}</span>
+                      <span className="max-w-[220px] truncate text-[13px] text-muted">{fileSource(file.url)}</span>
                       {canFiles && (
                         <form action={removeProgramFileAction}>
                           <input type="hidden" name="fileId" value={file.id} />
@@ -355,6 +356,26 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
             <h2 className="font-display text-xl font-bold">Guidelines</h2>
             <GuidelineLinks items={guidelineItems} />
             {role !== "retailerGuest" && <Link href="/guidelines" className="inline-block self-start py-2.5 text-sm font-semibold underline hover:text-accent-text">Open the guidelines library</Link>}
+          </section>
+
+          <section className={`${CARD} flex flex-col gap-3`}>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="font-display text-xl font-bold">Retailer sign-off</h2>
+              <StatusPill style={program.retailerApprovedAt ? { ...APPROVAL_STYLES.approved, label: "Signed off" } : { ...APPROVAL_STYLES.awaitingProof, label: "Not signed off yet" }} />
+            </div>
+            {program.retailerApprovedAt ? (
+              <>
+                <p className="text-sm text-muted">{program.retailer || "The retailer"} signed off {formatStamp(program.retailerApprovedAt, zone)}.{program.retailerNote ? ` “${program.retailerNote}”` : ""}</p>
+                {can(role, "retailer.signoff") && open && (
+                  <form action={withdrawRetailerSignoffAction}>
+                    <input type="hidden" name="programId" value={program.id} />
+                    <button type="submit" className="h-11 rounded-[10px] border-[1.5px] border-ink px-3.5 text-[13px] font-semibold">Withdraw the sign-off</button>
+                  </form>
+                )}
+              </>
+            ) : can(role, "retailer.signoff") && open ? (
+              <RetailerSignoffForm programId={program.id} own={role === "retailerGuest"} />
+            ) : <p className="text-sm text-muted">Waiting for {program.retailer || "the retailer"} to sign off.</p>}
           </section>
 
           <section className={`${CARD} flex flex-col gap-1`}>

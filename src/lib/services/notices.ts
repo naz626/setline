@@ -24,6 +24,8 @@ export interface Notice {
   path: { brand: string; vendor: string };
   /** Addresses in `to` that belong to vendor contacts. */
   vendorRecipients: string[];
+  /** The workspace's Slack or Teams address, if alerts are connected. */
+  alertWebhookUrl?: string;
 }
 
 async function emailsWithRoles(db: Db, workspaceId: string, roles: Role[]): Promise<string[]> {
@@ -50,7 +52,7 @@ async function ownerOrLeads(db: Db, workspaceId: string, ownerId: string | null)
 
 /**
  * Works out who should be emailed about an event and what to say, from the saved state.
- * The person who caused the event is never emailed. Returns undefined when nobody needs to hear.
+ * The person who caused the event is never emailed, and `to` can be empty. Returns undefined when the event is not news.
  */
 export async function buildNotice(db: Db, member: Member, event: NoticeEvent): Promise<Notice | undefined> {
   const workspaceId = member.workspace.id;
@@ -114,7 +116,14 @@ export async function buildNotice(db: Db, member: Member, event: NoticeEvent): P
     text = `${member.workspace.name} changed ${program.name}:\n\n“${change.summary}”${redo}\n\nOpen the program and tap “Got it” so they know you have seen it.`;
   }
 
-  const unique = [...new Set(to)].filter((email) => email !== member.user.email);
-  if (unique.length === 0) return undefined;
-  return { to: unique, subject, text, path, vendorRecipients: unique.filter((email) => contacts.includes(email)) };
+  let unique = [...new Set(to)].filter((email) => email !== member.user.email);
+  if (unique.length > 0) {
+    // Leave out anyone who switched this kind of email off.
+    const muted = await db.select({ email: users.email, mutedNotices: memberships.mutedNotices }).from(memberships)
+      .innerJoin(users, eq(users.id, memberships.userId))
+      .where(and(eq(memberships.workspaceId, workspaceId), inArray(users.email, unique)));
+    const off = new Set(muted.filter((m) => m.mutedNotices.includes(event.type)).map((m) => m.email));
+    unique = unique.filter((email) => !off.has(email));
+  }
+  return { to: unique, subject, text, path, vendorRecipients: unique.filter((email) => contacts.includes(email)), alertWebhookUrl: member.workspace.alertWebhookUrl ?? undefined };
 }

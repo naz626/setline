@@ -17,6 +17,7 @@ import { PROOF_KINDS, PROOF_LABELS, approvalStatus, listProofsForProgram } from 
 import type { Member } from "@/lib/services/member";
 import { APPROVAL_STYLES, HEALTH_STYLES, VENDOR_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
+import { fileHref } from "@/lib/uploads";
 import { MILESTONE_LABELS, MILESTONE_OWNER, daysBetween, formatLong, formatShort } from "@/lib/timeline";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
@@ -131,7 +132,7 @@ async function ProgramCard({ view, member }: { view: ProgramView; member: Member
           <ul>
             {files.map((file) => (
               <li key={file.id} className="border-b border-line py-1 last:border-b-0">
-                <a href={file.url} target="_blank" rel="noopener noreferrer" className="inline-block py-2.5 text-sm font-semibold underline hover:text-accent-text">
+                <a href={fileHref("program", file.id, file.url)} target="_blank" rel="noopener noreferrer" className="inline-block py-2.5 text-sm font-semibold underline hover:text-accent-text">
                   {FILE_LABELS[file.kind]}<span className="sr-only"> for {program.name} (opens in a new tab)</span>
                 </a>
               </li>

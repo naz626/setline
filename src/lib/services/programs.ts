@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { programFileKindEnum, programFiles, programs, vendors } from "@/lib/db/schema";
-import type { ProgramFileKind, ProgramRow, VendorRow } from "@/lib/db/schema";
+import type { ProgramFileKind, ProgramRow, VendorRow, WorkspaceRow } from "@/lib/db/schema";
 import { DISPLAY_TYPES } from "@/lib/options";
 import {
   MILESTONES,
@@ -80,16 +80,64 @@ export function visibleTo(member: Member) {
   return and(inWorkspace, eq(programs.vendorId, member.membership.vendorId ?? ""), sql`${programs.completed} ->> 'submit' is not null`);
 }
 
-async function loadContext(db: Db, member: Member) {
+async function loadContext(db: Db, { workspace }: { workspace: WorkspaceRow }) {
   const [vendorRows, profileRows] = await Promise.all([
-    db.select().from(vendors).where(eq(vendors.workspaceId, member.workspace.id)),
-    listProfiles(db, member.workspace.id),
+    db.select().from(vendors).where(eq(vendors.workspaceId, workspace.id)),
+    listProfiles(db, workspace.id),
   ]);
   return {
     vendorById: new Map(vendorRows.map((v) => [v.id, v])),
     profiles: profileRows.map(toEngineProfile),
-    today: todayInZone(member.workspace.timezone),
+    today: todayInZone(workspace.timezone),
   };
+}
+
+/**
+ * Every open program in a workspace, for the calendar feed. There is no signed-in person here:
+ * the caller must already have matched the feed's secret to this workspace.
+ */
+export async function listOpenProgramsForFeed(db: Db, workspace: WorkspaceRow): Promise<ProgramView[]> {
+  const [rows, context] = await Promise.all([db.select().from(programs).where(eq(programs.workspaceId, workspace.id)), loadContext(db, { workspace })]);
+  return rows
+    .map((row) => buildProgramView(row, row.vendorId ? context.vendorById.get(row.vendorId) : undefined, context.profiles, context.today))
+    .filter((view) => view.health !== "complete");
+}
+
+export interface ImportResult {
+  created: number;
+}
+
+/**
+ * Creates plans from pasted spreadsheet rows: name, retailer, display type, in-store date, vendor (optional),
+ * store count (optional). Columns are separated by tabs or commas. Nothing is saved unless every row is valid.
+ */
+export async function importPrograms(db: Db, member: Member, pasted: string): Promise<ImportResult> {
+  assertCan(member.membership.role, "programs.create");
+  const lines = pasted.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // A first row that is clearly a header is skipped.
+  if (lines.length > 0 && /^"?(program|name)\b/i.test(lines[0])) lines.shift();
+  if (lines.length === 0) throw new InputError("Paste at least one row: name, retailer, display type, in-store date.");
+  if (lines.length > 200) throw new InputError("Import up to 200 programs at a time.");
+  const vendorRows = await db.select().from(vendors).where(eq(vendors.workspaceId, member.workspace.id));
+  await db.transaction(async (tx) => {
+    for (const [index, line] of lines.entries()) {
+      const cells = (line.includes("\t") ? line.split("\t") : line.split(",")).map((cell) => cell.trim().replace(/^"|"$/g, ""));
+      const [name = "", retailer = "", displayType = "", inStoreDate = "", vendorName = "", storeCount = ""] = cells;
+      const row = `Row ${index + 1}${name ? ` (${name})` : ""}`;
+      const type = DISPLAY_TYPES.find((t) => t.toLowerCase() === displayType.toLowerCase());
+      if (!type) throw new InputError(`${row}: the display type must be one of ${DISPLAY_TYPES.join(", ")}.`);
+      const vendor = vendorName ? vendorRows.find((v) => v.name.toLowerCase() === vendorName.toLowerCase()) : undefined;
+      if (vendorName && !vendor) throw new InputError(`${row}: there is no vendor called “${vendorName}”. Add the vendor first or leave the column empty.`);
+      try {
+        // The transaction stands in for the database, so one bad row rolls every row back.
+        await createProgram(tx as unknown as Db, member, { name, retailer, displayType: type, storeCount, inStoreDate, vendorId: vendor?.id ?? "" });
+      } catch (error) {
+        if (error instanceof InputError) throw new InputError(`${row}: ${error.message}${/date/.test(error.message) ? " Use the form 2027-03-15." : ""}`);
+        throw error;
+      }
+    }
+  });
+  return { created: lines.length };
 }
 
 const HEALTH_ORDER: Health[] = ["willMiss", "atRisk", "onTrack", "notStarted", "complete"];
@@ -116,13 +164,30 @@ export async function findVisibleProgram(db: Db, member: Member, id: string): Pr
 }
 
 /** Links are the only kind of file for now. Only https links are kept so a link can never run script. */
-export function parseLink(value: string, label = "The link"): string {
+/** How an uploaded file is recorded in a link column: this prefix, then its path in file storage. */
+export const UPLOAD_PREFIX = "blob:";
+
+/** Where a workspace's uploads live in file storage. Nothing outside it can be attached to that workspace's records. */
+export function uploadFolder(workspaceId: string): string {
+  return `w/${workspaceId}/`;
+}
+
+/**
+ * Checks a file reference: a full https link, or an upload made by this workspace.
+ * Pass the workspace to accept uploads; without it only links are allowed.
+ */
+export function parseLink(value: string, label = "The link", workspaceId?: string): string {
   const trimmed = value.trim();
+  if (workspaceId && trimmed.startsWith(UPLOAD_PREFIX)) {
+    const path = trimmed.slice(UPLOAD_PREFIX.length);
+    if (!path.startsWith(uploadFolder(workspaceId)) || path.includes("..") || path.length > 600) throw new InputError("That upload could not be found. Upload the file again.");
+    return trimmed;
+  }
   let url: URL | undefined;
   try {
     url = new URL(trimmed);
   } catch {}
-  if (!url || url.protocol !== "https:" || trimmed.length > 2000) throw new InputError(`${label} must be a full https:// address.`);
+  if (!url || url.protocol !== "https:" || trimmed.length > 2000) throw new InputError(`${label} must be an uploaded file or a full https:// address.`);
   return url.toString();
 }
 
@@ -181,7 +246,7 @@ export async function createProgram(db: Db, member: Member, input: NewProgramInp
   const leadTimeOverrides = parseSteps(input.leadTimes ?? {}, false);
   const files = (input.files ?? []).filter((file) => file.url.trim() !== "").map((file) => {
     if (!(programFileKindEnum.enumValues as readonly string[]).includes(file.kind)) throw new InputError("Choose what kind of file this is.");
-    return { kind: file.kind as ProgramFileKind, url: parseLink(file.url, "Each file link") };
+    return { kind: file.kind as ProgramFileKind, url: parseLink(file.url, "Each file link", member.workspace.id) };
   });
   if (input.submitNow && !vendorId) throw new InputError("Choose a vendor before submitting, or save the program as a plan.");
   const today = todayInZone(member.workspace.timezone);
@@ -329,5 +394,29 @@ export async function setMilestoneDate(db: Db, member: Member, programId: string
   await db.transaction(async (tx) => {
     await tx.update(programs).set({ completed: { ...row.completed, [milestone]: doneOn } }).where(eq(programs.id, row.id));
     await recordActivity(tx, member, row.id, "milestone", `Corrected ${MILESTONE_LABELS[milestone]}: done ${formatShort(doneOn)}, not ${formatShort(was)}`);
+  });
+}
+
+/** Records the retailer's sign-off on a program. A retailer guest gives it; the brand can record it for them. */
+export async function giveRetailerSignoff(db: Db, member: Member, programId: string, note: string): Promise<void> {
+  assertCan(member.membership.role, "retailer.signoff");
+  const row = await findVisibleProgram(db, member, programId);
+  if (row.retailerApprovedAt) return;
+  const retailerNote = note.trim().slice(0, 500);
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ retailerApprovedAt: new Date(), retailerApprovedBy: member.user.id, retailerNote }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "retailer",
+      `${member.membership.role === "retailerGuest" ? "The retailer signed off" : "Recorded the retailer's sign-off"}${retailerNote ? `. “${retailerNote}”` : ""}`);
+  });
+}
+
+/** Takes the retailer's sign-off back, for example after a change the retailer has to see again. */
+export async function withdrawRetailerSignoff(db: Db, member: Member, programId: string): Promise<void> {
+  assertCan(member.membership.role, "retailer.signoff");
+  const row = await findVisibleProgram(db, member, programId);
+  if (!row.retailerApprovedAt) return;
+  await db.transaction(async (tx) => {
+    await tx.update(programs).set({ retailerApprovedAt: null, retailerApprovedBy: null, retailerNote: "" }).where(eq(programs.id, row.id));
+    await recordActivity(tx, member, row.id, "retailer", "Withdrew the retailer's sign-off");
   });
 }

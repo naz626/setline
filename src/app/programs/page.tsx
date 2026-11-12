@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { StageBar } from "@/components/StageBar";
 import { StatusIcon, StatusPill } from "@/components/StatusPill";
-import { can } from "@/lib/auth/permissions";
+import { Tour } from "@/components/Tour";
+import { can, isBrandRole } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { countUnseenChanges } from "@/lib/services/changes";
@@ -34,9 +35,12 @@ async function Programs() {
           <h1 className="font-display text-4xl font-bold tracking-tight">Programs</h1>
           <p className="mt-1.5 text-[15px] text-muted">Here is what needs you today.</p>
         </div>
-        {canCreate && (
-          <Link href="/programs/new" className="inline-flex h-12 items-center rounded-xl bg-accent px-5 text-sm font-semibold text-ink">New program</Link>
-        )}
+        <div className="flex flex-wrap gap-3">
+          {isBrandRole(member.membership.role) && <Tour autoStart />}
+          {canCreate && (
+            <Link href="/programs/new" className="inline-flex h-12 items-center rounded-xl bg-accent px-5 text-sm font-semibold text-ink">New program</Link>
+          )}
+        </div>
       </div>
 
       {views.length === 0 ? (

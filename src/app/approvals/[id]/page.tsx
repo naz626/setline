@@ -9,6 +9,7 @@ import { getDb } from "@/lib/db/client";
 import { PROOF_LABELS, getProofDetail, versionStatus } from "@/lib/services/proofs";
 import { VERSION_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
+import { fileHref, fileSource, isUpload } from "@/lib/uploads";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 
@@ -46,10 +47,10 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
           <section className={`${CARD} flex flex-col gap-3`}>
             <h2 className="font-display text-xl font-bold">The file</h2>
             {proof.note && <p className="text-sm leading-relaxed">{proof.note}</p>}
-            <a href={proof.url} target="_blank" rel="noopener noreferrer" className="inline-flex h-12 items-center self-start rounded-xl bg-accent px-5 text-sm font-semibold text-ink">
+            <a href={fileHref("proof", proof.id, proof.url)} target="_blank" rel="noopener noreferrer" className="inline-flex h-12 items-center self-start rounded-xl bg-accent px-5 text-sm font-semibold text-ink">
               Open the {kind.toLowerCase()}<span className="sr-only"> (opens in a new tab)</span>
             </a>
-            <p className="text-[13px] break-all text-muted">{proof.url}</p>
+            <p className="text-[13px] break-all text-muted">{isUpload(proof.url) ? `Uploaded file: ${fileSource(proof.url)}` : proof.url}</p>
           </section>
 
           <section className={`${CARD} flex flex-col gap-4`}>
