@@ -11,13 +11,14 @@ import { getDb } from "@/lib/db/client";
 import { emailConfigured, sendEmail } from "@/lib/email";
 import { acknowledgeChange, logChange } from "@/lib/services/changes";
 import { InputError } from "@/lib/services/errors";
+import { createCalendarToken, removeCalendarToken, setAlertWebhook, setNoticePreferences } from "@/lib/services/settings";
 import { addProgramFile, removeProgramFile } from "@/lib/services/files";
 import { buildNotice } from "@/lib/services/notices";
 import type { NoticeEvent } from "@/lib/services/notices";
 import { createProfile, deleteProfile, updateProfile } from "@/lib/services/leadTimes";
 import type { StepInput } from "@/lib/services/leadTimes";
 import { addGuidelineVersion, createGuideline, deleteGuideline } from "@/lib/services/guidelines";
-import { assignVendor, completeNextMilestone, createProgram, giveRetailerSignoff, moveInStoreDate, setMilestoneDate, undoMilestone, updateProgramDetails, updateProgramLeadTimes, withdrawRetailerSignoff } from "@/lib/services/programs";
+import { assignVendor, completeNextMilestone, createProgram, giveRetailerSignoff, importPrograms, moveInStoreDate, setMilestoneDate, undoMilestone, updateProgramDetails, updateProgramLeadTimes, withdrawRetailerSignoff } from "@/lib/services/programs";
 import { addProofComment, decideProof, submitProof } from "@/lib/services/proofs";
 import { addStores, markAllStores, markStore, removeStore, resetStore, removeStorePhoto, setStorePhoto } from "@/lib/services/stores";
 import { inviteMember, revokeInvitation } from "@/lib/services/team";
@@ -30,6 +31,8 @@ export interface FormState {
   message?: string;
   /** Development only: the sign-in link, shown on screen when email is not set up. */
   devLink?: string;
+  /** Something to copy, shown once (the calendar address). */
+  secret?: string;
 }
 
 const text = (formData: FormData, name: string) => String(formData.get(name) ?? "");
@@ -58,20 +61,30 @@ async function baseUrl(): Promise<string> {
  * A notification that cannot be sent never fails the change that caused it.
  */
 async function announce(member: Awaited<ReturnType<typeof requireMember>>, event: NoticeEvent): Promise<void> {
-  if (!emailConfigured()) return;
+  if (!emailConfigured() && !member.workspace.alertWebhookUrl) return;
   const base = await baseUrl();
   after(async () => {
     try {
       const notice = await buildNotice(await getDb(), member, event);
       if (!notice) return;
-      const results = await Promise.allSettled(notice.to.map((to) =>
-        sendEmail({ to, subject: notice.subject, text: `${notice.text}\n\n${base}${notice.vendorRecipients.includes(to) ? notice.path.vendor : notice.path.brand}\n\nSent by Setline for ${member.workspace.name}.` })));
+      const emails = emailConfigured() ? notice.to : [];
+      const results = await Promise.allSettled([
+        ...emails.map((to) =>
+          sendEmail({ to, subject: notice.subject, text: `${notice.text}\n\n${base}${notice.vendorRecipients.includes(to) ? notice.path.vendor : notice.path.brand}\n\nSent by Setline for ${member.workspace.name}. Choose which emails you get: ${base}/settings/notifications` })),
+        ...(notice.alertWebhookUrl ? [postAlert(notice.alertWebhookUrl, `${notice.subject}\n${notice.text}\n${base}${notice.path.brand}`)] : []),
+      ]);
       const failed = results.filter((r) => r.status === "rejected").length;
-      if (failed > 0) console.error(`Setline: ${failed} of ${results.length} notification emails could not be sent (${event.type}).`);
+      if (failed > 0) console.error(`Setline: ${failed} of ${results.length} notifications could not be sent (${event.type}).`);
     } catch (error) {
       console.error("Setline: a notification could not be prepared.", error);
     }
   });
+}
+
+/** Posts a plain-text alert to the workspace's Slack or Teams incoming webhook. */
+async function postAlert(url: string, text: string): Promise<void> {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }), signal: AbortSignal.timeout(8000) });
+  if (!response.ok) throw new Error(`Alert webhook answered ${response.status}`);
 }
 
 export async function requestSignInLink(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -446,4 +459,41 @@ export async function retailerSignoffAction(_prev: FormState, formData: FormData
 
 export async function withdrawRetailerSignoffAction(formData: FormData): Promise<void> {
   await quietly(async (member) => withdrawRetailerSignoff(await getDb(), member, text(formData, "programId")));
+}
+
+export async function saveNoticePreferencesAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await setNoticePreferences(await getDb(), member, formData.getAll("notice").filter((value): value is string => typeof value === "string"));
+    return "Saved.";
+  });
+}
+
+export async function setAlertWebhookAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    const url = formData.has("disconnect") ? "" : text(formData, "webhook");
+    await setAlertWebhook(await getDb(), member, url);
+    return url.trim() ? "Connected. Alerts will be posted there from now on." : "Disconnected.";
+  });
+}
+
+export async function createCalendarLinkAction(): Promise<FormState> {
+  const member = await requireMember();
+  try {
+    const token = await createCalendarToken(await getDb(), member);
+    refresh();
+    return { message: "Copy this address into your calendar app now. It is shown only once.", secret: `${await baseUrl()}/calendar/${token}.ics` };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function removeCalendarLinkAction(): Promise<void> {
+  await quietly(async (member) => removeCalendarToken(await getDb(), member));
+}
+
+export async function importProgramsAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    const { created } = await importPrograms(await getDb(), member, text(formData, "rows"));
+    return `Imported ${created} ${created === 1 ? "program" : "programs"} as plans.`;
+  });
 }

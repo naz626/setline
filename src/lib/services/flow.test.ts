@@ -143,3 +143,59 @@ describe("notices", () => {
     expect(await buildNotice(db, outsider, { type: "proofSent", proofId })).toBeUndefined();
   });
 });
+
+describe("settings, alerts, calendar and import", () => {
+  it("lets each person switch a kind of email off", async () => {
+    const { noticeChoicesFor, setNoticePreferences } = await import("./settings");
+    expect(noticeChoicesFor("vendorGuest").map((c) => c.type)).toEqual(["proofDecided", "submittedToVendor", "changeLogged"]);
+    const programId = await createProgram(db, admin, { ...base, name: "Quiet", inStoreDate: addDays(today, 240), vendorId, submitNow: true });
+    await setNoticePreferences(db, rep, ["proofDecided"]);
+    const quiet = (await buildNotice(db, admin, { type: "submittedToVendor", programId }))!;
+    expect(quiet.to).toEqual([]);
+    await setNoticePreferences(db, rep, ["proofDecided", "submittedToVendor", "changeLogged"]);
+    expect((await buildNotice(db, admin, { type: "submittedToVendor", programId }))!.to).toEqual(["rep@acme.test"]);
+  });
+
+  it("accepts only Slack or Teams webhook addresses, from an admin", async () => {
+    const { setAlertWebhook } = await import("./settings");
+    await expect(setAlertWebhook(db, admin, "https://evil.test/hook")).rejects.toThrow(/Slack/);
+    await expect(setAlertWebhook(db, admin, "http://hooks.slack.com/services/x")).rejects.toThrow(InputError);
+    await expect(setAlertWebhook(db, reviewer, "https://hooks.slack.com/services/T/B/x")).rejects.toThrow(ForbiddenError);
+    await setAlertWebhook(db, admin, "https://hooks.slack.com/services/T/B/x");
+    const refreshed = await memberFor("admin@brand.test");
+    expect(refreshed.workspace.alertWebhookUrl).toBe("https://hooks.slack.com/services/T/B/x");
+    await setAlertWebhook(db, admin, "");
+    expect((await memberFor("admin@brand.test")).workspace.alertWebhookUrl).toBeNull();
+  });
+
+  it("finds a workspace by its calendar secret until the secret is replaced", async () => {
+    const { createCalendarToken, findWorkspaceByCalendarToken, removeCalendarToken } = await import("./settings");
+    const { listOpenProgramsForFeed } = await import("./programs");
+    await expect(createCalendarToken(db, rep)).rejects.toThrow(ForbiddenError);
+    const first = await createCalendarToken(db, admin);
+    const workspace = (await findWorkspaceByCalendarToken(db, first))!;
+    expect(workspace.id).toBe(admin.workspace.id);
+    expect((await listOpenProgramsForFeed(db, workspace)).length).toBeGreaterThan(0);
+    const second = await createCalendarToken(db, admin);
+    expect(await findWorkspaceByCalendarToken(db, first)).toBeUndefined();
+    expect(await findWorkspaceByCalendarToken(db, "short")).toBeUndefined();
+    await removeCalendarToken(db, admin);
+    expect(await findWorkspaceByCalendarToken(db, second)).toBeUndefined();
+  });
+
+  it("imports pasted programs all together or not at all", async () => {
+    const { importPrograms } = await import("./programs");
+    const before = (await listProgramViews(db, admin)).length;
+    const date = addDays(today, 250);
+    await expect(importPrograms(db, admin, `Good One, Northline, Endcap, ${date}\nBad One, Northline, Spaceship, ${date}`)).rejects.toThrow(/Row 2 \(Bad One\): the display type/);
+    await expect(importPrograms(db, admin, `Good One, Northline, Endcap, ${date}\nBad Date, Northline, Endcap, 3/15/27`)).rejects.toThrow(/Row 2 \(Bad Date\).*2027-03-15/);
+    await expect(importPrograms(db, admin, `X, Northline, Endcap, ${date}, Nobody Inc`)).rejects.toThrow(/no vendor called/);
+    expect((await listProgramViews(db, admin)).length).toBe(before);
+    const result = await importPrograms(db, admin, `Name\tRetailer\tType\tDate\nTabbed\tNorthline\tendcap\t${date}\tacme displays\t40\n"Quoted", Northline, Endcap, ${date}`);
+    expect(result.created).toBe(2);
+    const views = await listProgramViews(db, admin);
+    expect(views.length).toBe(before + 2);
+    expect(views.find((v) => v.program.name === "Tabbed")).toMatchObject({ vendor: { name: "Acme Displays" }, program: { storeCount: 40, displayType: "Endcap" } });
+    await expect(importPrograms(db, rep, `A, B, Endcap, ${date}`)).rejects.toThrow(ForbiddenError);
+  });
+});

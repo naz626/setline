@@ -18,7 +18,9 @@ Working today:
 
 - A five-step create flow, program files as links, an activity log per program, and email notifications
 
-Not built yet: file uploads (files are links for now), notification preferences, and third-party integrations. See `docs/build-brief.md` for the plan.
+- Private file uploads, install photos, retailer sign-off, notification choices, a guided tour, Slack or Teams alerts, a calendar feed and spreadsheet import
+
+Not built yet: connections that need partner access (Esko and others). File uploads need `BLOB_READ_WRITE_TOKEN`, which Vercel sets when a Blob store is connected. See `docs/build-brief.md` for the plan.
 
 ## Run it
 

@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { programFileKindEnum, programFiles, programs, vendors } from "@/lib/db/schema";
-import type { ProgramFileKind, ProgramRow, VendorRow } from "@/lib/db/schema";
+import type { ProgramFileKind, ProgramRow, VendorRow, WorkspaceRow } from "@/lib/db/schema";
 import { DISPLAY_TYPES } from "@/lib/options";
 import {
   MILESTONES,
@@ -80,16 +80,64 @@ export function visibleTo(member: Member) {
   return and(inWorkspace, eq(programs.vendorId, member.membership.vendorId ?? ""), sql`${programs.completed} ->> 'submit' is not null`);
 }
 
-async function loadContext(db: Db, member: Member) {
+async function loadContext(db: Db, { workspace }: { workspace: WorkspaceRow }) {
   const [vendorRows, profileRows] = await Promise.all([
-    db.select().from(vendors).where(eq(vendors.workspaceId, member.workspace.id)),
-    listProfiles(db, member.workspace.id),
+    db.select().from(vendors).where(eq(vendors.workspaceId, workspace.id)),
+    listProfiles(db, workspace.id),
   ]);
   return {
     vendorById: new Map(vendorRows.map((v) => [v.id, v])),
     profiles: profileRows.map(toEngineProfile),
-    today: todayInZone(member.workspace.timezone),
+    today: todayInZone(workspace.timezone),
   };
+}
+
+/**
+ * Every open program in a workspace, for the calendar feed. There is no signed-in person here:
+ * the caller must already have matched the feed's secret to this workspace.
+ */
+export async function listOpenProgramsForFeed(db: Db, workspace: WorkspaceRow): Promise<ProgramView[]> {
+  const [rows, context] = await Promise.all([db.select().from(programs).where(eq(programs.workspaceId, workspace.id)), loadContext(db, { workspace })]);
+  return rows
+    .map((row) => buildProgramView(row, row.vendorId ? context.vendorById.get(row.vendorId) : undefined, context.profiles, context.today))
+    .filter((view) => view.health !== "complete");
+}
+
+export interface ImportResult {
+  created: number;
+}
+
+/**
+ * Creates plans from pasted spreadsheet rows: name, retailer, display type, in-store date, vendor (optional),
+ * store count (optional). Columns are separated by tabs or commas. Nothing is saved unless every row is valid.
+ */
+export async function importPrograms(db: Db, member: Member, pasted: string): Promise<ImportResult> {
+  assertCan(member.membership.role, "programs.create");
+  const lines = pasted.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // A first row that is clearly a header is skipped.
+  if (lines.length > 0 && /^"?(program|name)\b/i.test(lines[0])) lines.shift();
+  if (lines.length === 0) throw new InputError("Paste at least one row: name, retailer, display type, in-store date.");
+  if (lines.length > 200) throw new InputError("Import up to 200 programs at a time.");
+  const vendorRows = await db.select().from(vendors).where(eq(vendors.workspaceId, member.workspace.id));
+  await db.transaction(async (tx) => {
+    for (const [index, line] of lines.entries()) {
+      const cells = (line.includes("\t") ? line.split("\t") : line.split(",")).map((cell) => cell.trim().replace(/^"|"$/g, ""));
+      const [name = "", retailer = "", displayType = "", inStoreDate = "", vendorName = "", storeCount = ""] = cells;
+      const row = `Row ${index + 1}${name ? ` (${name})` : ""}`;
+      const type = DISPLAY_TYPES.find((t) => t.toLowerCase() === displayType.toLowerCase());
+      if (!type) throw new InputError(`${row}: the display type must be one of ${DISPLAY_TYPES.join(", ")}.`);
+      const vendor = vendorName ? vendorRows.find((v) => v.name.toLowerCase() === vendorName.toLowerCase()) : undefined;
+      if (vendorName && !vendor) throw new InputError(`${row}: there is no vendor called “${vendorName}”. Add the vendor first or leave the column empty.`);
+      try {
+        // The transaction stands in for the database, so one bad row rolls every row back.
+        await createProgram(tx as unknown as Db, member, { name, retailer, displayType: type, storeCount, inStoreDate, vendorId: vendor?.id ?? "" });
+      } catch (error) {
+        if (error instanceof InputError) throw new InputError(`${row}: ${error.message}${/date/.test(error.message) ? " Use the form 2027-03-15." : ""}`);
+        throw error;
+      }
+    }
+  });
+  return { created: lines.length };
 }
 
 const HEALTH_ORDER: Health[] = ["willMiss", "atRisk", "onTrack", "notStarted", "complete"];

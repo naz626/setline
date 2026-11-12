@@ -158,7 +158,13 @@ Default milestones and durations used in the sample data. These are placeholders
 - Changes at any point: a new quote or proof version can be sent until the program ships (it replaces a waiting version, or reopens an approval already given). `/programs/:id` has a Changes log (`src/lib/services/changes.ts`): each change has a category and description, can reopen approvals, emails the vendor, and stays "not seen" until the vendor taps "Got it". A reopened approval takes its key date back and holds up the remaining dates in the engine.
 - Fixing mistakes: the most recent key date can be marked as not done, any completed date can be corrected, and details, the in-store date and the program's own lead times can be edited at any time. Every edit is written to the activity log with before and after values.
 
-Still not built: file upload and storage (files are links for now), pinned comments on proofs, sample-photo and retailer sign-off approvals, store photos, the retailer guest view scoped to their own programs, notification preferences and Slack or Teams alerts, CSV import for programs and vendors, the guided tour, and every third-party connection.
+- File uploads to a private Vercel Blob store (`src/components/FileField.tsx`, `/api/upload`, `/files/:kind/:id`). A file column holds either an https link or `blob:<path>`; uploads are only accepted from the workspace's own folder and are served through the app after an access check on the record they belong to. Without `BLOB_READ_WRITE_TOKEN` the upload button is hidden and links still work.
+- Install photo per store (adds the photo and marks the store installed) and a retailer sign-off on each program
+- `/settings/notifications`: each person chooses which emails they get
+- Guided tour (`src/components/Tour.tsx`): five stops, opens once per browser on the Programs page, replayable from "Take the tour"
+- Integrations that work today: Slack or Teams incoming-webhook alerts, a secret calendar feed at `/calendar/<secret>.ics`, and pasting programs from a spreadsheet
+
+Still not built: pinned comments on proofs, sample-photo approvals, the retailer guest view scoped to their own programs, and connections that need a partner or an OAuth app: Esko WebCenter, PageProof, Asana, Smartsheet, monday.com, Drive, Dropbox, OneDrive, EDI ship notices and carrier tracking.
 
 Decisions made while building, which differ from the first draft of this brief:
 

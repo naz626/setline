@@ -42,6 +42,7 @@ async function NavUser() {
   return (
     <form action={signOut} className="ml-auto flex items-center gap-3">
       <span className="hidden text-[13px] text-muted 2xl:inline">{member.workspace.name} · {member.user.email}</span>
+      <Link href="/settings/notifications" className="inline-flex h-11 items-center px-1 text-[13px] font-semibold text-muted hover:text-accent-text">Notifications</Link>
       <button type="submit" className="h-11 rounded-[10px] border-[1.5px] border-ink px-3.5 text-[13px] font-semibold">Sign out</button>
     </form>
   );
