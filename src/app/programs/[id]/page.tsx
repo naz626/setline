@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { removeProgramFileAction } from "@/app/actions";
+import { acknowledgeChangeAction, removeProgramFileAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { GuidelineLinks } from "@/components/Guidelines";
-import { AddFileForm, CompleteMilestoneForm, MoveInStoreDateForm } from "@/components/ProgramForms";
+import { AddFileForm, ChangeInStoreDateForm, CompleteMilestoneForm, EditDetailsForm, EditMilestoneForm, LogChangeForm, MoveInStoreDateForm, ProgramLeadTimesForm } from "@/components/ProgramForms";
 import { SubmitProofForm } from "@/components/ProofForms";
 import { AssignVendorForm, VendorStatusForm } from "@/components/VendorForms";
 import { StatusPill } from "@/components/StatusPill";
@@ -11,13 +11,14 @@ import { can, isBrandRole } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { listActivity } from "@/lib/services/activity";
+import { CHANGE_LABELS, listChanges } from "@/lib/services/changes";
 import { FILE_LABELS, listProgramFiles } from "@/lib/services/files";
 import { guidelinesForProgram } from "@/lib/services/guidelines";
 import { getProgramView } from "@/lib/services/programs";
-import { PROOF_KINDS, PROOF_LABELS, approvalStatus, listProofsForProgram } from "@/lib/services/proofs";
+import { PROOF_KINDS, PROOF_LABELS, approvalStatus, listProofsForProgram, versionStatus } from "@/lib/services/proofs";
 import { listStores, storeStep } from "@/lib/services/stores";
 import { listStatusHistory, listVendors } from "@/lib/services/vendors";
-import { APPROVAL_STYLES, HEALTH_STYLES, STAGES, VENDOR_STYLES } from "@/lib/status";
+import { APPROVAL_STYLES, HEALTH_STYLES, STAGES, VENDOR_STYLES, VERSION_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
 import { MILESTONES, MILESTONE_LABELS, MILESTONE_OWNER, STEPS, STEP_LABELS, daysBetween, formatLong, formatShort } from "@/lib/timeline";
 
@@ -34,7 +35,7 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
 
   const canEdit = can(role, "programs.editSchedule");
   const seesProofs = can(role, "proofs.view");
-  const [proofRows, guidelineItems, stores, history, vendorList, files, activity] = await Promise.all([
+  const [proofRows, guidelineItems, stores, history, vendorList, files, activity, changes] = await Promise.all([
     seesProofs ? listProofsForProgram(db, member, id) : [],
     guidelinesForProgram(db, member, view.program),
     listStores(db, member, id),
@@ -42,6 +43,7 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
     canEdit ? listVendors(db, member) : [],
     listProgramFiles(db, member, id),
     isBrandRole(role) ? listActivity(db, member, view.program) : [],
+    isBrandRole(role) ? listChanges(db, member, id) : [],
   ]);
   const canFiles = can(role, "files.manage");
 
@@ -51,11 +53,16 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
   const late = projected.inStore > planned.inStore;
   const ownerName = { brand: "Brand team", vendor: vendor?.name ?? "Vendor", target: "Target" };
   const approvals = PROOF_KINDS.map((kind) => {
-    const latest = proofRows.find((p) => p.kind === kind);
-    return { kind, latest, status: approvalStatus(Boolean(completed[kind]), latest) };
+    const versions = proofRows.filter((p) => p.kind === kind);
+    return { kind, latest: versions[0], versions, status: approvalStatus(Boolean(completed[kind]), versions[0]) };
   });
-  const sendable = approvals.filter((a) => a.status === "awaitingProof" || a.status === "changesRequested").map((a) => ({ id: a.kind, label: PROOF_LABELS[a.kind] }));
   const open = !completed.inStore;
+  // New versions and reopened approvals are possible at any point until the program ships.
+  const proofsOpen = open && !completed.shipped;
+  const proofChoices = PROOF_KINDS.map((kind) => ({ id: kind, label: PROOF_LABELS[kind] }));
+  const lastDone = [...MILESTONES].reverse().find((key) => completed[key]);
+  const unseen = changes.filter((change) => !change.acknowledgedAt).length;
+  const zone = member.workspace.timezone;
   const vendorChoices = vendorList.map((v) => ({ id: v.vendor.id, name: v.vendor.name }));
   const canChangeVendor = canEdit && open && !completed.productionComplete;
   const installed = stores.filter((s) => storeStep(s) === "installed").length;
@@ -75,7 +82,22 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
           <span>In store <strong className="font-semibold text-ink">{formatLong(program.inStoreDate)}</strong>{health !== "complete" && program.inStoreDate >= today && ` · ${daysBetween(today, program.inStoreDate)} days left`}</span>
           <span>Vendor <strong className="font-semibold text-ink">{vendor?.name ?? "Not chosen yet"}</strong></span>
           {program.retailer && <span>Retailer <strong className="font-semibold text-ink">{program.retailer}</strong></span>}
+          <span>{program.displayType}{program.storeCount ? ` · ${program.storeCount} stores` : ""}</span>
         </div>
+        {canEdit && (
+          <details className="rounded-[14px] border border-line bg-surface">
+            <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Edit details or change the in-store date</summary>
+            <div className="flex flex-col gap-6 border-t border-line p-4">
+              <EditDetailsForm program={{ id: program.id, name: program.name, retailer: program.retailer, displayType: program.displayType, storeCount: program.storeCount }} />
+              {open && (
+                <div className="border-t border-line pt-5">
+                  <ChangeInStoreDateForm programId={program.id} current={program.inStoreDate} today={today} />
+                  <p className="mt-2 text-[13px] text-muted">Every key date is counted back again from the new date. The change is added to the activity log.</p>
+                </div>
+              )}
+            </div>
+          </details>
+        )}
       </div>
 
       {late && health !== "complete" && (
@@ -126,7 +148,14 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
                   <span className="flex-[1_1_180px] text-sm">{MILESTONE_LABELS[key]}</span>
                   <span className="w-36 text-[13px] font-normal text-muted">{ownerName[MILESTONE_OWNER[key]]}</span>
                   <span className="flex min-w-36 flex-1 justify-end text-right text-[13px]" style={{ color: slipped ? HEALTH_STYLES.willMiss.text : undefined }}>
-                    {done ? `Done ${formatShort(done)}` : isNext && canEdit ? (
+                    {done ? (canEdit ? (
+                      <details className="group w-full text-right">
+                        <summary className="inline-flex min-h-11 cursor-pointer items-center gap-2 font-normal">Done {formatShort(done)} <span className="font-semibold underline group-open:hidden">Edit<span className="sr-only"> {MILESTONE_LABELS[key]}</span></span></summary>
+                        <div className="mt-2 rounded-[14px] border border-line p-4">
+                          <EditMilestoneForm programId={program.id} milestone={key} label={MILESTONE_LABELS[key]} doneOn={done} today={today} canUndo={key === lastDone} />
+                        </div>
+                      </details>
+                    ) : `Done ${formatShort(done)}`) : isNext && canEdit ? (
                       <span className="flex flex-col items-end gap-1">
                         {slipped && <span>Now {formatShort(projected[key])}</span>}
                         <CompleteMilestoneForm programId={program.id} milestone={key} label={MILESTONE_LABELS[key]} />
@@ -158,9 +187,59 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
               );
             })}
           </ul>
+          {canEdit && open && (
+            <details className="mt-3 rounded-[14px] border border-line">
+              <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Change for this program</summary>
+              <div className="border-t border-line p-4">
+                <ProgramLeadTimesForm programId={program.id} steps={STEPS.map((step) => ({ id: step, label: STEP_LABELS[step], days: leadTimes[step].days, unit: leadTimes[step].unit }))} />
+                <p className="mt-2 text-[13px] text-muted">Only this program changes. A number that matches your profiles goes back to following them.</p>
+              </div>
+            </details>
+          )}
           <Link href="/settings/lead-times" className="mt-3 inline-block py-3 text-sm font-semibold underline hover:text-accent-text">See how lead times are set</Link>
         </section>
       </div>
+
+      {isBrandRole(role) && completed.submit && (
+        <section className={`${CARD} flex flex-col gap-3`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-display text-xl font-bold">Changes</h2>
+            {unseen > 0 && <StatusPill style={{ ...HEALTH_STYLES.atRisk, label: `${unseen} not seen by the vendor yet` }} />}
+          </div>
+          {changes.length === 0 ? <p className="text-sm text-muted">No changes since this program was submitted. Log one whenever artwork, structure, quantities, stores or dates change, so the vendor sees it and nothing is missed.</p> : (
+            <ul>
+              {changes.map((change) => (
+                <li key={change.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-line py-3 last:border-b-0">
+                  <div className="min-w-0 flex-[1_1_320px]">
+                    <p className="text-sm"><span className="font-semibold">{CHANGE_LABELS[change.category]}:</span> {change.summary}</p>
+                    {change.reopened.length > 0 && <p className="mt-0.5 text-[13px]" style={{ color: HEALTH_STYLES.atRisk.text }}>Reopened: {change.reopened.map((kind) => PROOF_LABELS[kind].toLowerCase()).join(", ")}</p>}
+                    <p className="mt-0.5 text-[13px] text-muted">{formatStamp(change.createdAt, zone)}{change.by ? ` · ${change.by}` : ""}</p>
+                  </div>
+                  {change.acknowledgedAt ? (
+                    <span className="text-[13px] text-muted">Seen {formatStamp(change.acknowledgedAt, zone)}{change.acknowledgedBy ? ` · ${change.acknowledgedBy}` : ""}</span>
+                  ) : (
+                    <span className="flex flex-wrap items-center gap-3">
+                      <span className="text-[13px] font-semibold" style={{ color: HEALTH_STYLES.atRisk.text }}>Not seen yet</span>
+                      {can(role, "changes.acknowledge") && (
+                        <form action={acknowledgeChangeAction}>
+                          <input type="hidden" name="changeId" value={change.id} />
+                          <button type="submit" className="h-11 rounded-[10px] border-[1.5px] border-ink px-3.5 text-[13px] font-semibold">Vendor confirmed<span className="sr-only"> this change: {change.summary}</span></button>
+                        </form>
+                      )}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {open && can(role, "changes.log") && (
+            <details className="rounded-[14px] border border-line">
+              <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Log a change</summary>
+              <div className="border-t border-line p-4"><LogChangeForm programId={program.id} approvals={proofsOpen && vendor ? proofChoices : []} /></div>
+            </details>
+          )}
+        </section>
+      )}
 
       <div className="flex flex-wrap items-start gap-6">
         <section id="vendor" className={`${CARD} flex min-w-0 flex-[1_1_420px] scroll-mt-6 flex-col gap-4`}>
@@ -204,24 +283,37 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
               {!vendor ? <p className="text-sm text-muted">Choose a vendor to start sending and approving proofs.</p> : (
                 <>
                   <ul>
-                    {approvals.map(({ kind, latest, status }) => (
-                      <li key={kind} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line py-2.5 last:border-b-0">
-                        <span className="text-sm font-semibold">{PROOF_LABELS[kind]}</span>
-                        <span className="flex flex-wrap items-center gap-3">
-                          <StatusPill style={APPROVAL_STYLES[status]} />
-                          {latest && (
-                            <Link href={`/approvals/${latest.id}`} className="inline-block py-2.5 text-[13px] font-semibold underline hover:text-accent-text">
-                              {status === "needsDecision" && can(role, "proofs.decide") ? "Review" : "Open"} version {latest.version}<span className="sr-only"> of the {PROOF_LABELS[kind].toLowerCase()}</span>
-                            </Link>
-                          )}
-                        </span>
+                    {approvals.map(({ kind, versions, status }) => (
+                      <li key={kind} className="border-b border-line py-2.5 last:border-b-0">
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                          <span className="text-sm font-semibold">{PROOF_LABELS[kind]}</span>
+                          <StatusPill style={status === "awaitingProof" && versions.length > 0 ? { ...APPROVAL_STYLES.awaitingProof, label: "Needs a new version" } : APPROVAL_STYLES[status]} />
+                        </div>
+                        {versions.length > 0 && (
+                          <ul className="mt-1">
+                            {versions.map((version, i) => {
+                              const state = versionStatus(version, i === 0);
+                              return (
+                                <li key={version.id} className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
+                                  <Link href={`/approvals/${version.id}`} className="inline-block py-2.5 font-semibold underline hover:text-accent-text">
+                                    {state === "needsDecision" && can(role, "proofs.decide") ? "Review version" : "Version"} {version.version}<span className="sr-only"> of the {PROOF_LABELS[kind].toLowerCase()}</span>
+                                  </Link>
+                                  <span className="text-muted">{VERSION_STYLES[state].label} · sent {formatStamp(version.createdAt, zone)}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
                       </li>
                     ))}
                   </ul>
-                  {open && sendable.length > 0 && can(role, "proofs.submit") && (
+                  {proofsOpen && can(role, "proofs.submit") && (
                     <details className="rounded-[14px] border border-line">
-                      <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Add a quote or proof the vendor sent you</summary>
-                      <div className="border-t border-line p-4"><SubmitProofForm programId={program.id} kinds={sendable} /></div>
+                      <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Add a new version the vendor sent you</summary>
+                      <div className="border-t border-line p-4">
+                        <SubmitProofForm programId={program.id} kinds={proofChoices} />
+                        <p className="mt-2 text-[13px] text-muted">You can add a version at any point until the program ships. A new version of something already approved reopens that approval.</p>
+                      </div>
                     </details>
                   )}
                 </>

@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
-import { memberships, programs, proofs, users, vendors } from "@/lib/db/schema";
+import { memberships, programChanges, programs, proofs, users, vendors } from "@/lib/db/schema";
 import type { Role } from "@/lib/db/schema";
 import { formatLong, formatShort } from "@/lib/timeline";
 import type { Member } from "./member";
@@ -12,7 +12,8 @@ export type NoticeEvent =
   | { type: "submittedToVendor"; programId: string }
   | { type: "vendorStatus"; programId: string }
   | { type: "proofSent"; proofId: string }
-  | { type: "proofDecided"; proofId: string };
+  | { type: "proofDecided"; proofId: string }
+  | { type: "changeLogged"; changeId: string };
 
 export interface Notice {
   to: string[];
@@ -55,10 +56,15 @@ export async function buildNotice(db: Db, member: Member, event: NoticeEvent): P
   const workspaceId = member.workspace.id;
   let programId: string;
   let proof: typeof proofs.$inferSelect | undefined;
+  let change: typeof programChanges.$inferSelect | undefined;
   if (event.type === "proofSent" || event.type === "proofDecided") {
     [proof] = await db.select().from(proofs).where(and(eq(proofs.id, event.proofId), eq(proofs.workspaceId, workspaceId)));
     if (!proof) return undefined;
     programId = proof.programId;
+  } else if (event.type === "changeLogged") {
+    [change] = await db.select().from(programChanges).where(and(eq(programChanges.id, event.changeId), eq(programChanges.workspaceId, workspaceId)));
+    if (!change) return undefined;
+    programId = change.programId;
   } else {
     programId = event.programId;
   }
@@ -101,6 +107,11 @@ export async function buildNotice(db: Db, member: Member, event: NoticeEvent): P
       ? `The ${label}, for ${program.name} was approved.`
       : `Changes were requested on the ${label}, for ${program.name}.\n\n“${proof.decisionNote}”\n\nSend a new version when it is ready.`;
     path = { brand: `/approvals/${proof.id}`, vendor: `/approvals/${proof.id}` };
+  } else if (event.type === "changeLogged" && change) {
+    to = contacts;
+    subject = `Change to ${program.name}`;
+    const redo = change.reopened.length > 0 ? `\n\nThis reopens: ${change.reopened.map((kind) => PROOF_LABELS[kind].toLowerCase()).join(", ")}. Please send a new version.` : "";
+    text = `${member.workspace.name} changed ${program.name}:\n\n“${change.summary}”${redo}\n\nOpen the program and tap “Got it” so they know you have seen it.`;
   }
 
   const unique = [...new Set(to)].filter((email) => email !== member.user.email);

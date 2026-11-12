@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { acknowledgeChangeAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { GuidelineLinks } from "@/components/Guidelines";
 import { SubmitProofForm } from "@/components/ProofForms";
@@ -7,13 +8,15 @@ import { StatusPill } from "@/components/StatusPill";
 import { VendorMilestoneForm, VendorStatusForm } from "@/components/VendorForms";
 import { requireMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
+import { CHANGE_LABELS, listChanges } from "@/lib/services/changes";
 import { FILE_LABELS, listProgramFiles } from "@/lib/services/files";
 import { guidelinesForProgram } from "@/lib/services/guidelines";
 import { listProgramViews } from "@/lib/services/programs";
 import type { ProgramView } from "@/lib/services/programs";
 import { PROOF_KINDS, PROOF_LABELS, approvalStatus, listProofsForProgram } from "@/lib/services/proofs";
 import type { Member } from "@/lib/services/member";
-import { APPROVAL_STYLES, VENDOR_STYLES } from "@/lib/status";
+import { APPROVAL_STYLES, HEALTH_STYLES, VENDOR_STYLES } from "@/lib/status";
+import { formatStamp } from "@/lib/today";
 import { MILESTONE_LABELS, MILESTONE_OWNER, daysBetween, formatLong, formatShort } from "@/lib/timeline";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
@@ -24,19 +27,27 @@ function nextUp(view: ProgramView): string {
   if (!next) return "Everything is done.";
   const who = MILESTONE_OWNER[next] === "vendor" ? "You" : "The brand";
   const due = planned[next];
-  const when = due < today ? `was due ${formatShort(due)}, ${daysBetween(due, today)} days ago` : due === today ? "is due today" : `is due ${formatShort(due)}, in ${daysBetween(today, due)} days`;
+  const days = (count: number) => `${count} ${count === 1 ? "day" : "days"}`;
+  const when = due < today ? `was due ${formatShort(due)}, ${days(daysBetween(due, today))} ago` : due === today ? "is due today" : `is due ${formatShort(due)}, in ${days(daysBetween(today, due))}`;
   return `${MILESTONE_LABELS[next]} ${when}. ${who === "You" ? "This one is yours." : "This one is with the brand."}`;
 }
 
 async function ProgramCard({ view, member }: { view: ProgramView; member: Member }) {
   const db = await getDb();
   const { program, next, completed, today } = view;
-  const [proofRows, guidelineItems, files] = await Promise.all([listProofsForProgram(db, member, program.id), guidelinesForProgram(db, member, program), listProgramFiles(db, member, program.id)]);
+  const [proofRows, guidelineItems, files, changes] = await Promise.all([
+    listProofsForProgram(db, member, program.id), guidelinesForProgram(db, member, program), listProgramFiles(db, member, program.id), listChanges(db, member, program.id),
+  ]);
+  const unseen = changes.filter((change) => !change.acknowledgedAt);
+  const zone = member.workspace.timezone;
   const approvals = PROOF_KINDS.map((kind) => {
-    const latest = proofRows.find((p) => p.kind === kind);
-    return { kind, latest, status: approvalStatus(Boolean(completed[kind]), latest) };
+    const versions = proofRows.filter((p) => p.kind === kind);
+    return { kind, latest: versions[0], count: versions.length, status: approvalStatus(Boolean(completed[kind]), versions[0]) };
   });
-  const sendable = approvals.filter((a) => a.status === "awaitingProof" || a.status === "changesRequested").map((a) => ({ id: a.kind, label: PROOF_LABELS[a.kind] }));
+  // A new version can be sent at any point until the program ships.
+  const sendable = completed.shipped ? [] : PROOF_KINDS.map((kind) => ({ id: kind, label: PROOF_LABELS[kind] }));
+  // When the next key date is an approval with nothing in front of the brand, the next move is the vendor's.
+  const yours = approvals.find((a) => a.kind === next && (a.status === "awaitingProof" || a.status === "changesRequested"));
   const vendorStep = next === "productionComplete" || next === "shipped" ? next : undefined;
   const reported = program.vendorState ?? undefined;
 
@@ -55,7 +66,30 @@ async function ProgramCard({ view, member }: { view: ProgramView; member: Member
         </div>
       </div>
 
-      <p className="rounded-[14px] bg-canvas px-4 py-3 text-sm font-medium">{nextUp(view)}</p>
+      <p className="rounded-[14px] bg-canvas px-4 py-3 text-sm font-medium">{yours ? `The brand is waiting for ${yours.count > 0 ? "a new version of the" : "the"} ${PROOF_LABELS[yours.kind].toLowerCase()} from you. It was planned to be approved by ${formatShort(view.planned[yours.kind])}.` : nextUp(view)}</p>
+
+      {changes.length > 0 && (
+        <section className="flex flex-col gap-2 rounded-[14px] p-4" style={{ background: unseen.length > 0 ? HEALTH_STYLES.atRisk.tint : undefined, border: unseen.length > 0 ? undefined : "1px solid var(--color-line)" }}>
+          <h3 className="font-display text-lg font-bold">{unseen.length > 0 ? `${unseen.length} ${unseen.length === 1 ? "change" : "changes"} from the brand to confirm` : "Changes from the brand"}</h3>
+          <ul>
+            {changes.map((change) => (
+              <li key={change.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-ink/15 py-2.5 last:border-b-0">
+                <div className="min-w-0 flex-[1_1_260px]">
+                  <p className="text-sm"><span className="font-semibold">{CHANGE_LABELS[change.category]}:</span> {change.summary}</p>
+                  {change.reopened.length > 0 && <p className="text-[13px] font-semibold">Needs a new version: {change.reopened.map((kind) => PROOF_LABELS[kind].toLowerCase()).join(", ")}</p>}
+                  <p className="text-[13px] text-muted">{formatStamp(change.createdAt, zone)}{change.acknowledgedAt ? ` · confirmed ${formatStamp(change.acknowledgedAt, zone)}` : ""}</p>
+                </div>
+                {!change.acknowledgedAt && (
+                  <form action={acknowledgeChangeAction}>
+                    <input type="hidden" name="changeId" value={change.id} />
+                    <button type="submit" className="h-12 rounded-xl bg-ink px-5 text-sm font-semibold text-white">Got it<span className="sr-only">: {change.summary}</span></button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -70,20 +104,23 @@ async function ProgramCard({ view, member }: { view: ProgramView; member: Member
       <section className="flex flex-col gap-2">
         <h3 className="font-display text-lg font-bold">Quotes and proofs</h3>
         <ul>
-          {approvals.map(({ kind, latest, status }) => (
+          {approvals.map(({ kind, latest, count, status }) => (
             <li key={kind} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line py-2.5 last:border-b-0">
               <span className="text-sm font-semibold">{PROOF_LABELS[kind]}</span>
               <span className="flex flex-wrap items-center gap-3">
-                <StatusPill style={{ ...APPROVAL_STYLES[status], label: status === "needsDecision" ? "With the brand" : status === "awaitingProof" ? "Not sent yet" : APPROVAL_STYLES[status].label }} />
-                {latest && <Link href={`/approvals/${latest.id}`} className="inline-block py-2.5 text-[13px] font-semibold underline hover:text-accent-text">Version {latest.version}<span className="sr-only"> of the {PROOF_LABELS[kind].toLowerCase()} for {program.name}</span></Link>}
+                <StatusPill style={{ ...APPROVAL_STYLES[status], label: status === "needsDecision" ? "With the brand" : status === "awaitingProof" ? (count > 0 ? "Needs a new version" : "Not sent yet") : APPROVAL_STYLES[status].label }} />
+                {latest && <Link href={`/approvals/${latest.id}`} className="inline-block py-2.5 text-[13px] font-semibold underline hover:text-accent-text">Version {latest.version}{count > 1 ? ` of ${count}` : ""}<span className="sr-only"> of the {PROOF_LABELS[kind].toLowerCase()} for {program.name}</span></Link>}
               </span>
             </li>
           ))}
         </ul>
         {sendable.length > 0 && (
           <details className="rounded-[14px] border border-line">
-            <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Send a quote or proof</summary>
-            <div className="border-t border-line p-4"><SubmitProofForm programId={program.id} kinds={sendable} /></div>
+            <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">Send a quote, proof or new version</summary>
+            <div className="border-t border-line p-4">
+              <SubmitProofForm programId={program.id} kinds={sendable} />
+              <p className="mt-2 text-[13px] text-muted">You can send a new version at any point until the program ships. A new version of something already approved goes back to the brand for approval.</p>
+            </div>
           </details>
         )}
       </section>

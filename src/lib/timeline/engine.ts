@@ -50,7 +50,8 @@ export function projectForward(input: ProgressInput): Schedule {
     const done = completed[key];
     if (done) {
       projected[key] = done;
-      previous = done;
+      // A reopened earlier date (an approval sent back after later steps were done) still holds up what remains.
+      previous = previous ? maxDate(previous, done) : done;
       return;
     }
     let earliest = maxDate(planned[key], today);
