@@ -10,7 +10,7 @@ import { SESSION_COOKIE, requireMember, requireUser } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { emailConfigured, sendEmail } from "@/lib/email";
 import { acknowledgeChange, logChange } from "@/lib/services/changes";
-import { ReadOnlyError, assertWritable, extendTrial, setFounding, setWorkspacePlan } from "@/lib/services/billing";
+import { ReadOnlyError, assertWritable, beginBillingPortal, beginCheckout, extendTrial, setFounding, setWorkspacePlan } from "@/lib/services/billing";
 import { InputError } from "@/lib/services/errors";
 import { createCalendarToken, removeCalendarToken, setAlertWebhook, setNoticePreferences } from "@/lib/services/settings";
 import { addProgramFile, removeProgramFile } from "@/lib/services/files";
@@ -525,7 +525,33 @@ export async function importProgramsAction(_prev: FormState, formData: FormData)
   });
 }
 
-/** Operator controls: set by hand until card checkout exists. The services check the operator list again. */
+/** Sends the person to Stripe Checkout for a new subscription. Works even on a read-only, trial-ended workspace: this is how it stops being read-only. */
+export async function beginCheckoutAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const member = await requireMember();
+  const base = await baseUrl();
+  let url: string;
+  try {
+    url = await beginCheckout(await getDb(), member, {
+      plan: text(formData, "plan"),
+      interval: text(formData, "interval"),
+      successUrl: `${base}/settings/billing?checkout=success`,
+      cancelUrl: `${base}/settings/billing?checkout=canceled`,
+    });
+  } catch (error) {
+    return failure(error);
+  }
+  redirect(url);
+}
+
+/** Sends the person to the Stripe Billing Portal to update their card, change plan, or cancel. */
+export async function beginBillingPortalAction(): Promise<void> {
+  const member = await requireMember();
+  const base = await baseUrl();
+  const url = await beginBillingPortal(await getDb(), member, `${base}/settings/billing`);
+  redirect(url);
+}
+
+/** Operator controls: manual overrides for cases card checkout does not cover (Enterprise, comps, fixes). The services check the operator list again. */
 export async function operatorAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser();
   const db = await getDb();

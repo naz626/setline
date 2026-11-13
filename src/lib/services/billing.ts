@@ -1,12 +1,14 @@
 import { and, asc, count, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { isBrandRole } from "@/lib/auth/permissions";
+import { assertCan, isBrandRole } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { invitations, memberships, programs, uploads, users, workspaces } from "@/lib/db/schema";
 import type { Role, WorkspaceRow } from "@/lib/db/schema";
 import {
-  DATA_RETENTION_DAYS, DELETION_WARNING_DAYS, FOUNDING_PLACES, TRIAL_DAYS, TRIAL_EXTENSION_DAYS, TRIAL_REMINDER_DAYS, isPlanId, planState, trialDay,
+  DATA_RETENTION_DAYS, DELETION_WARNING_DAYS, FOUNDING_PLACES, PLANS, TRIAL_DAYS, TRIAL_EXTENSION_DAYS, TRIAL_REMINDER_DAYS, isPlanId, planState, trialDay,
 } from "@/lib/plans";
 import type { PlanState } from "@/lib/plans";
+import { createCheckoutSession, createPortalSession, priceIdFor, stripeConfigured } from "@/lib/stripe";
+import type { BillingInterval } from "@/lib/stripe";
 import { uploadsConfigured } from "@/lib/uploads";
 import { InputError } from "./errors";
 import type { Member } from "./member";
@@ -201,6 +203,75 @@ export async function dueForDeletion(db: Db, now: Date = new Date()): Promise<Wo
  * and all. Every table that holds a workspace's data cascades from the workspace row (see schema.ts),
  * except the files themselves in file storage, which are deleted here first, best-effort.
  */
+/* Card checkout, through Stripe Checkout and the Billing Portal. Setline never sees a card number.
+   Choosing a plan this way, or by the operator's manual override above, both just set workspaces.plan. */
+
+export async function beginCheckout(db: Db, member: Member, input: { plan: string; interval: string; successUrl: string; cancelUrl: string }): Promise<string> {
+  assertCan(member.membership.role, "workspace.manage");
+  if (!stripeConfigured()) throw new InputError("Card checkout is not set up for this site yet.");
+  if (input.plan !== "starter" && input.plan !== "team") throw new InputError("Choose a plan.");
+  if (input.interval !== "monthly" && input.interval !== "yearly") throw new InputError("Choose monthly or yearly billing.");
+  const priceId = priceIdFor(input.plan, input.interval as BillingInterval);
+  if (!priceId) throw new InputError(`${PLANS[input.plan].name} is not set up for ${input.interval} billing yet.`);
+  const workspace = await findWorkspace(db, member.workspace.id);
+  const session = await createCheckoutSession({
+    priceId,
+    customerId: workspace.stripeCustomerId ?? undefined,
+    customerEmail: workspace.stripeCustomerId ? undefined : member.user.email,
+    successUrl: input.successUrl,
+    cancelUrl: input.cancelUrl,
+    workspaceId: workspace.id,
+    plan: input.plan,
+  });
+  return session.url;
+}
+
+/** The hosted page where a brand admin updates their card, switches plan, or cancels. */
+export async function beginBillingPortal(db: Db, member: Member, returnUrl: string): Promise<string> {
+  assertCan(member.membership.role, "workspace.manage");
+  if (!stripeConfigured()) throw new InputError("Card checkout is not set up for this site yet.");
+  const workspace = await findWorkspace(db, member.workspace.id);
+  if (!workspace.stripeCustomerId) throw new InputError("Choose a plan first to set up billing.");
+  const session = await createPortalSession(workspace.stripeCustomerId, returnUrl);
+  return session.url;
+}
+
+/** Checkout finished: the workspace is now on the plan it paid for. */
+export async function applyCheckoutCompleted(db: Db, session: { customer?: unknown; subscription?: unknown; metadata?: Record<string, unknown> }): Promise<void> {
+  const workspaceId = session.metadata?.workspaceId;
+  const plan = session.metadata?.plan;
+  if (typeof workspaceId !== "string" || typeof plan !== "string" || !isPlanId(plan)) return;
+  await db.update(workspaces).set({ plan, stripeCustomerId: String(session.customer ?? ""), stripeSubscriptionId: String(session.subscription ?? "") || null }).where(eq(workspaces.id, workspaceId));
+}
+
+/** A subscription changed status at Stripe: moved to a different plan, or lapsed. */
+export async function applySubscriptionUpdated(db: Db, subscription: { id?: unknown; customer?: unknown; status?: unknown; metadata?: Record<string, unknown> }): Promise<void> {
+  const customerId = String(subscription.customer ?? "");
+  if (!customerId) return;
+  const [workspace] = await db.select().from(workspaces).where(eq(workspaces.stripeCustomerId, customerId));
+  if (!workspace) return;
+  const status = String(subscription.status ?? "");
+  if (status === "active" || status === "trialing") {
+    const plan = subscription.metadata?.plan;
+    const update: { stripeSubscriptionId: string | null; plan?: WorkspaceRow["plan"] } = { stripeSubscriptionId: String(subscription.id ?? "") || null };
+    if (typeof plan === "string" && isPlanId(plan) && plan !== workspace.plan) update.plan = plan;
+    await db.update(workspaces).set(update).where(eq(workspaces.id, workspace.id));
+  } else if (status === "canceled" || status === "unpaid" || status === "incomplete_expired") {
+    await applySubscriptionCanceled(db, customerId);
+  }
+}
+
+/**
+ * A subscription ended with nothing to replace it: the workspace goes read-only the same way an unpaid
+ * trial does, by setting the plan back to "trial" with a trial that has already ended. No new status
+ * is needed, since this is exactly that case — paid access ended and no plan is chosen.
+ */
+export async function applySubscriptionCanceled(db: Db, customerId: string): Promise<void> {
+  const [workspace] = await db.select().from(workspaces).where(eq(workspaces.stripeCustomerId, customerId));
+  if (!workspace || workspace.plan === "trial") return;
+  await db.update(workspaces).set({ plan: "trial", trialEndsAt: new Date(), stripeSubscriptionId: null }).where(eq(workspaces.id, workspace.id));
+}
+
 export async function deleteWorkspace(db: Db, workspaceId: string): Promise<void> {
   if (uploadsConfigured()) {
     const rows = await db.select({ pathname: uploads.pathname }).from(uploads).where(eq(uploads.workspaceId, workspaceId));

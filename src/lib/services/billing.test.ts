@@ -7,10 +7,12 @@ import { programs, vendors, workspaces } from "@/lib/db/schema";
 import { addDays } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
 import {
-  ReadOnlyError, assertWritable, deleteWorkspace, dueForDeletion, dueForDeletionWarning, dueTrialReminders, extendTrial, isOperator,
-  listWorkspacesForOperator, markDeletionWarned, markTrialReminderSent, memberPlanState, setFounding, setWorkspacePlan, workspaceUsage,
+  ReadOnlyError, applyCheckoutCompleted, applySubscriptionCanceled, applySubscriptionUpdated, assertWritable, beginCheckout, deleteWorkspace,
+  dueForDeletion, dueForDeletionWarning, dueTrialReminders, extendTrial, isOperator, listWorkspacesForOperator, markDeletionWarned,
+  markTrialReminderSent, memberPlanState, setFounding, setWorkspacePlan, workspaceUsage,
 } from "./billing";
 import { InputError } from "./errors";
+import { ForbiddenError } from "@/lib/auth/permissions";
 import { findMember } from "./member";
 import type { Member } from "./member";
 import { buildNotice } from "./notices";
@@ -176,6 +178,50 @@ describe("plan limits", () => {
     await expect(setFounding(db, OPERATOR, made[10].workspace.id, true)).rejects.toThrow(/All 10 founding places/);
     await setFounding(db, OPERATOR, made[0].workspace.id, false);
     await setFounding(db, OPERATOR, made[10].workspace.id, true);
+  });
+});
+
+describe("card checkout", () => {
+  it("only a brand admin can start checkout, and only when Stripe is configured", async () => {
+    const admin = await newWorkspace("checkout-admin@brand.test", "Checkout Co");
+    await inviteMember(db, admin, { email: "pm@checkout.test", role: "programManager", vendorId: "" });
+    const { token } = await createLoginToken(db, "pm@checkout.test");
+    const { user } = await consumeLoginToken(db, token);
+    const manager = (await findMember(db, user))!;
+    await expect(beginCheckout(db, manager, { plan: "starter", interval: "monthly", successUrl: "https://x.test/s", cancelUrl: "https://x.test/c" })).rejects.toThrow(ForbiddenError);
+    // STRIPE_SECRET_KEY is not set in tests, so this is as far as checkout can get without a live Stripe account.
+    await expect(beginCheckout(db, admin, { plan: "starter", interval: "monthly", successUrl: "https://x.test/s", cancelUrl: "https://x.test/c" })).rejects.toThrow(/not set up/);
+  });
+
+  it("applies a completed checkout, a plan change, and a cancellation from webhook payloads", async () => {
+    let admin = await newWorkspace("stripe-admin@brand.test", "Stripe Co");
+    const workspaceId = admin.workspace.id;
+
+    await applyCheckoutCompleted(db, { customer: "cus_123", subscription: "sub_123", metadata: { workspaceId, plan: "starter" } });
+    let [row] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(row).toMatchObject({ plan: "starter", stripeCustomerId: "cus_123", stripeSubscriptionId: "sub_123" });
+
+    // A plan change at Stripe (e.g. upgrading in the billing portal) carries over on the next subscription.updated.
+    await applySubscriptionUpdated(db, { id: "sub_456", customer: "cus_123", status: "active", metadata: { plan: "team" } });
+    [row] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(row).toMatchObject({ plan: "team", stripeSubscriptionId: "sub_456" });
+
+    // A payload for a customer nobody recognizes is just ignored, not an error.
+    await applySubscriptionUpdated(db, { id: "sub_999", customer: "cus_unknown", status: "active", metadata: { plan: "team" } });
+
+    // Cancellation reuses the trial's read-only machinery: no plan chosen, same as an unpaid trial.
+    await applySubscriptionUpdated(db, { id: "sub_456", customer: "cus_123", status: "canceled" });
+    [row] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(row).toMatchObject({ plan: "trial", stripeSubscriptionId: null });
+    expect(row!.trialEndsAt.getTime()).toBeLessThanOrEqual(Date.now());
+    admin = await reload(admin);
+    expect(() => assertWritable(admin)).toThrow(ReadOnlyError);
+
+    // A second cancellation (a stray retry) is a no-op, not a second reset of trialEndsAt.
+    const endedAt = row!.trialEndsAt.getTime();
+    await applySubscriptionCanceled(db, "cus_123");
+    [row] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(row!.trialEndsAt.getTime()).toBe(endedAt);
   });
 });
 

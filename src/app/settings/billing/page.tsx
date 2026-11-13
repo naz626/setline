@@ -1,10 +1,13 @@
+import { beginBillingPortalAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
+import { CheckoutForm } from "@/components/BillingForms";
 import { StatusPill } from "@/components/StatusPill";
 import { requireBrandMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { FOUNDING_DISCOUNT, PAID_PLANS, PLANS, TRIAL_EXTENSION_DAYS, price } from "@/lib/plans";
 import { memberPlanState, workspaceUsage } from "@/lib/services/billing";
 import { storageUsedBytes } from "@/lib/services/storage";
+import { priceIdFor, stripeConfigured } from "@/lib/stripe";
 import { HEALTH_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
 
@@ -12,12 +15,13 @@ const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 const money = (amount: number) => `$${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 const gb = (bytes: number) => (bytes / (1024 * 1024 * 1024)).toLocaleString("en-US", { maximumFractionDigits: 1 });
 
-async function Billing() {
+async function Billing({ searchParams }: { searchParams: Promise<{ checkout?: string }> }) {
   const member = await requireBrandMember();
   const state = memberPlanState(member);
   const db = await getDb();
-  const [usage, storageBytes] = await Promise.all([workspaceUsage(db, member.workspace.id), storageUsedBytes(db, member.workspace.id)]);
-  const { founding, trialEndsAt, timezone } = member.workspace;
+  const [usage, storageBytes, { checkout }] = await Promise.all([workspaceUsage(db, member.workspace.id), storageUsedBytes(db, member.workspace.id), searchParams]);
+  const { founding, trialEndsAt, timezone, stripeCustomerId } = member.workspace;
+  const cardCheckout = stripeConfigured();
   const pill = state.status === "active" ? { ...HEALTH_STYLES.onTrack, label: `${state.plan.name} plan` }
     : state.status === "trialing" ? { ...HEALTH_STYLES.complete, label: `Free trial, ${state.trialDaysLeft} ${state.trialDaysLeft === 1 ? "day" : "days"} left` }
     : { ...HEALTH_STYLES.willMiss, label: "Trial ended, read-only" };
@@ -29,6 +33,9 @@ async function Billing() {
         <StatusPill style={pill} />
       </div>
 
+      {checkout === "success" && <p className="rounded-[14px] px-4 py-3 text-sm font-semibold" style={{ background: HEALTH_STYLES.onTrack.tint, color: HEALTH_STYLES.onTrack.text }}>Thanks! Your plan is active. It can take a few seconds to show below — refresh if it still says trial.</p>}
+      {checkout === "canceled" && <p className="rounded-[14px] bg-canvas px-4 py-3 text-sm">Checkout was canceled. Nothing was charged.</p>}
+
       <section className={`${CARD} flex flex-col gap-2`}>
         <h2 className="font-display text-xl font-bold">Where you stand</h2>
         {state.status === "trialing" && <p className="text-sm">Your free trial has every Team feature and runs until <strong className="font-semibold">{formatStamp(trialEndsAt, timezone)}</strong>. After that the workspace becomes read-only until you choose a plan. Nothing is deleted for 60 days, and one {TRIAL_EXTENSION_DAYS}-day extension is available if you are mid-program.</p>}
@@ -38,6 +45,11 @@ async function Billing() {
           In use: {usage.seats}{state.plan.seats ? ` of ${state.plan.seats}` : ""} brand team seats (including pending invites) · {usage.openPrograms}{state.plan.openPrograms ? ` of ${state.plan.openPrograms}` : ""} open programs · {gb(storageBytes)}{state.plan.storageGb ? ` of ${state.plan.storageGb}` : ""} GB of file storage. Vendor and retailer guests are free and not counted.
         </p>
         {founding && <p className="text-sm font-semibold" style={{ color: HEALTH_STYLES.onTrack.text }}>You are a founding brand: {FOUNDING_DISCOUNT * 100}% off your first year.</p>}
+        {cardCheckout && stripeCustomerId && (
+          <form action={beginBillingPortalAction} className="self-start">
+            <button type="submit" className="mt-1 h-11 rounded-xl border-[1.5px] border-ink px-4 text-sm font-semibold">Manage billing</button>
+          </form>
+        )}
       </section>
 
       <section className="flex flex-col gap-4" aria-labelledby="plans">
@@ -47,6 +59,7 @@ async function Billing() {
             const plan = PLANS[id];
             const cost = price(plan, founding);
             const current = state.status === "active" && state.plan.id === id;
+            const canCheckout = cardCheckout && !current && (id === "starter" || id === "team") && Boolean(priceIdFor(id, "monthly"));
             return (
               <article key={id} className={`${CARD} flex flex-col gap-3 ${current ? "border-2 border-ink" : ""}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -66,20 +79,28 @@ async function Billing() {
                   {plan.alerts ? <li>Slack or Teams alerts and calendar feed</li> : <li className="text-muted">No Slack or Teams alerts or calendar feed</li>}
                   {id === "enterprise" && <li>Esko and other connections, single sign-on (as they become available)</li>}
                 </ul>
+                {canCheckout && (id === "starter" || id === "team") && (
+                  <div className="mt-auto flex flex-wrap gap-2">
+                    <CheckoutForm plan={id} interval="monthly" label="Subscribe monthly" />
+                    <CheckoutForm plan={id} interval="yearly" label="Subscribe yearly" />
+                  </div>
+                )}
               </article>
             );
           })}
         </div>
-        <p className="text-sm text-muted">Paying by card in the app is not available yet. To choose a plan or ask for a trial extension, contact Setline{process.env.SUPPORT_EMAIL ? <> at <a href={`mailto:${process.env.SUPPORT_EMAIL}`} className="font-semibold text-ink underline">{process.env.SUPPORT_EMAIL}</a></> : null} and your plan will be switched on by hand.</p>
+        {cardCheckout
+          ? <p className="text-sm text-muted">Enterprise is quoted per contract. Contact Setline{process.env.SUPPORT_EMAIL ? <> at <a href={`mailto:${process.env.SUPPORT_EMAIL}`} className="font-semibold text-ink underline">{process.env.SUPPORT_EMAIL}</a></> : null} to set it up.</p>
+          : <p className="text-sm text-muted">Paying by card in the app is not available yet. To choose a plan or ask for a trial extension, contact Setline{process.env.SUPPORT_EMAIL ? <> at <a href={`mailto:${process.env.SUPPORT_EMAIL}`} className="font-semibold text-ink underline">{process.env.SUPPORT_EMAIL}</a></> : null} and your plan will be switched on by hand.</p>}
       </section>
     </>
   );
 }
 
-export default function BillingPage() {
+export default function BillingPage({ searchParams }: { searchParams: Promise<{ checkout?: string }> }) {
   return (
     <AppShell active="/settings/billing">
-      <Billing />
+      <Billing searchParams={searchParams} />
     </AppShell>
   );
 }
