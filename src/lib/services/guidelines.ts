@@ -6,6 +6,7 @@ import type { GuidelineRow, GuidelineType, ProgramRow } from "@/lib/db/schema";
 import { InputError } from "./errors";
 import type { Member } from "./member";
 import { parseDate, parseLink, visibleTo } from "./programs";
+import { forgetUpload } from "./storage";
 
 export const GUIDELINE_LABELS: Record<GuidelineType, string> = { store: "Store guidelines", brand: "Brand guidelines", vendor: "Vendor guidelines" };
 
@@ -109,7 +110,9 @@ export async function addGuidelineVersion(db: Db, member: Member, input: { guide
 export async function deleteGuideline(db: Db, member: Member, id: string): Promise<void> {
   assertCan(member.membership.role, "guidelines.edit");
   const row = await findGuideline(db, member, id);
+  const versions = await db.select({ url: guidelineVersions.url }).from(guidelineVersions).where(eq(guidelineVersions.guidelineId, row.id));
   await db.delete(guidelines).where(eq(guidelines.id, row.id));
+  await Promise.all(versions.map((v) => forgetUpload(db, v.url)));
 }
 
 /**

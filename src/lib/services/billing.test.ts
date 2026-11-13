@@ -10,11 +10,13 @@ import {
   ReadOnlyError, assertWritable, dueTrialReminders, extendTrial, isOperator, listWorkspacesForOperator, markTrialReminderSent, memberPlanState,
   setFounding, setWorkspacePlan, workspaceUsage,
 } from "./billing";
+import { InputError } from "./errors";
 import { findMember } from "./member";
 import type { Member } from "./member";
 import { buildNotice } from "./notices";
 import { completeNextMilestone, createProgram, importPrograms } from "./programs";
 import { createCalendarToken, setAlertWebhook } from "./settings";
+import { assertStorageAvailable, forgetUpload, recordUpload, storageUsedBytes } from "./storage";
 import { inviteMember } from "./team";
 import { createVendor } from "./vendors";
 import { createWorkspace } from "./workspace";
@@ -106,6 +108,34 @@ describe("plan limits", () => {
     for (const n of [1, 2, 3, 4, 5, 6]) await inviteMember(db, admin, { email: `rep${n}@acme.test`, role: "vendorGuest", vendorId });
     await inviteMember(db, admin, { email: "buyer@retailer.test", role: "retailerGuest", vendorId: "", retailer: "Northline" });
     expect((await workspaceUsage(db, admin.workspace.id)).seats).toBe(5);
+  });
+
+  it("caps storage on Starter's 10 GB, frees space when a file is forgotten, and never caps Enterprise", async () => {
+    const GB = 1024 * 1024 * 1024;
+    await assertStorageAvailable(db, admin); // nothing used yet
+    await recordUpload(db, admin.workspace.id, "w/x/a.pdf", 9 * GB);
+    expect(await storageUsedBytes(db, admin.workspace.id)).toBe(9 * GB);
+    await assertStorageAvailable(db, admin); // still under 10 GB
+    await recordUpload(db, admin.workspace.id, "w/x/b.pdf", 2 * GB);
+    expect(await storageUsedBytes(db, admin.workspace.id)).toBe(11 * GB);
+    await expect(assertStorageAvailable(db, admin)).rejects.toThrow(InputError);
+    await expect(assertStorageAvailable(db, admin)).rejects.toThrow(/10 GB/);
+    // Forgetting a file frees its space, bringing the workspace back under the limit.
+    await forgetUpload(db, "blob:w/x/b.pdf");
+    expect(await storageUsedBytes(db, admin.workspace.id)).toBe(9 * GB);
+    await assertStorageAvailable(db, admin);
+    // A plain https link is not ours to free; forgetting it is a no-op.
+    await forgetUpload(db, "https://files.test/x.pdf");
+    expect(await storageUsedBytes(db, admin.workspace.id)).toBe(9 * GB);
+    // Enterprise has no storage cap.
+    await setWorkspacePlan(db, OPERATOR, admin.workspace.id, "enterprise");
+    const enterpriseAdmin = await reload(admin);
+    await recordUpload(db, admin.workspace.id, "w/x/c.pdf", 500 * GB);
+    await assertStorageAvailable(db, enterpriseAdmin);
+    await setWorkspacePlan(db, OPERATOR, admin.workspace.id, "starter");
+    admin = await reload(admin);
+    await forgetUpload(db, "blob:w/x/a.pdf");
+    await forgetUpload(db, "blob:w/x/c.pdf");
   });
 
   it("caps open programs on Starter, counting imports, and frees a place when one is in store", async () => {

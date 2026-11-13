@@ -3,8 +3,10 @@ import type { HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
 import { can } from "@/lib/auth/permissions";
 import { getCurrentMember } from "@/lib/auth/session";
+import { getDb } from "@/lib/db/client";
 import { assertWritable } from "@/lib/services/billing";
 import { uploadFolder } from "@/lib/services/programs";
+import { assertStorageAvailable, recordUpload } from "@/lib/services/storage";
 import { MAX_UPLOAD_BYTES, UPLOAD_TYPES, uploadsConfigured } from "@/lib/uploads";
 
 /**
@@ -14,6 +16,7 @@ import { MAX_UPLOAD_BYTES, UPLOAD_TYPES, uploadsConfigured } from "@/lib/uploads
 export async function POST(request: Request): Promise<NextResponse> {
   if (!uploadsConfigured()) return NextResponse.json({ error: "Uploads are not set up." }, { status: 503 });
   const body = (await request.json()) as HandleUploadBody;
+  const db = await getDb();
   try {
     const result = await handleUpload({
       request,
@@ -24,7 +27,24 @@ export async function POST(request: Request): Promise<NextResponse> {
         if (!can(member.membership.role, "files.upload")) throw new Error("Your role cannot upload files.");
         assertWritable(member);
         if (!pathname.startsWith(uploadFolder(member.workspace.id)) || pathname.includes("..")) throw new Error("That upload is not allowed.");
-        return { allowedContentTypes: UPLOAD_TYPES, maximumSizeInBytes: MAX_UPLOAD_BYTES, addRandomSuffix: true };
+        try {
+          await assertStorageAvailable(db, member);
+        } catch (error) {
+          throw new Error(error instanceof Error ? error.message : "This workspace is out of storage.");
+        }
+        return {
+          allowedContentTypes: UPLOAD_TYPES,
+          maximumSizeInBytes: MAX_UPLOAD_BYTES,
+          addRandomSuffix: true,
+          tokenPayload: JSON.stringify({ workspaceId: member.workspace.id }),
+        };
+      },
+      onUploadCompleted: async ({ blob, tokenPayload }) => {
+        const { workspaceId } = JSON.parse(tokenPayload ?? "{}") as { workspaceId?: string };
+        if (!workspaceId) return;
+        const { head } = await import("@vercel/blob");
+        const { size } = await head(blob.url);
+        await recordUpload(db, workspaceId, blob.pathname, size);
       },
     });
     return NextResponse.json(result);

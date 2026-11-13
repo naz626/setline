@@ -4,16 +4,19 @@ import { requireBrandMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { FOUNDING_DISCOUNT, PAID_PLANS, PLANS, TRIAL_EXTENSION_DAYS, price } from "@/lib/plans";
 import { memberPlanState, workspaceUsage } from "@/lib/services/billing";
+import { storageUsedBytes } from "@/lib/services/storage";
 import { HEALTH_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 const money = (amount: number) => `$${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const gb = (bytes: number) => (bytes / (1024 * 1024 * 1024)).toLocaleString("en-US", { maximumFractionDigits: 1 });
 
 async function Billing() {
   const member = await requireBrandMember();
   const state = memberPlanState(member);
-  const usage = await workspaceUsage(await getDb(), member.workspace.id);
+  const db = await getDb();
+  const [usage, storageBytes] = await Promise.all([workspaceUsage(db, member.workspace.id), storageUsedBytes(db, member.workspace.id)]);
   const { founding, trialEndsAt, timezone } = member.workspace;
   const pill = state.status === "active" ? { ...HEALTH_STYLES.onTrack, label: `${state.plan.name} plan` }
     : state.status === "trialing" ? { ...HEALTH_STYLES.complete, label: `Free trial, ${state.trialDaysLeft} ${state.trialDaysLeft === 1 ? "day" : "days"} left` }
@@ -32,7 +35,7 @@ async function Billing() {
         {state.status === "expired" && <p className="text-sm">Your free trial ended {formatStamp(trialEndsAt, timezone)}. Everything is still here and readable, and vendors can still see their programs. Choosing a plan switches changes back on.</p>}
         {state.status === "active" && <p className="text-sm">You are on the {state.plan.name} plan.</p>}
         <p className="text-sm text-muted">
-          In use: {usage.seats}{state.plan.seats ? ` of ${state.plan.seats}` : ""} brand team seats (including pending invites) · {usage.openPrograms}{state.plan.openPrograms ? ` of ${state.plan.openPrograms}` : ""} open programs. Vendor and retailer guests are free and not counted.
+          In use: {usage.seats}{state.plan.seats ? ` of ${state.plan.seats}` : ""} brand team seats (including pending invites) · {usage.openPrograms}{state.plan.openPrograms ? ` of ${state.plan.openPrograms}` : ""} open programs · {gb(storageBytes)}{state.plan.storageGb ? ` of ${state.plan.storageGb}` : ""} GB of file storage. Vendor and retailer guests are free and not counted.
         </p>
         {founding && <p className="text-sm font-semibold" style={{ color: HEALTH_STYLES.onTrack.text }}>You are a founding brand: {FOUNDING_DISCOUNT * 100}% off your first year.</p>}
       </section>
