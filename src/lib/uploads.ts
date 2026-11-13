@@ -29,6 +29,21 @@ export function fileHref(kind: FileKind, id: string, url: string): string {
   return isUpload(url) ? `/files/${kind}/${id}` : url;
 }
 
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+
+/** Whether a file's name suggests an image, so it can be shown inline with pinned comments. */
+export function isImageFile(url: string): boolean {
+  const name = isUpload(url) ? url : (() => {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return "";
+    }
+  })();
+  const lower = name.toLowerCase();
+  return IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 /** A short description of where the file lives, for display next to its name. */
 export function fileSource(url: string): string {
   if (isUpload(url)) return decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));

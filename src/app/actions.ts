@@ -330,7 +330,10 @@ export async function decideProofAction(_prev: FormState, formData: FormData): P
 
 export async function addProofCommentAction(_prev: FormState, formData: FormData): Promise<FormState> {
   return attempt(async (member) => {
-    await addProofComment(await getDb(), member, text(formData, "proofId"), text(formData, "body"));
+    const rawX = text(formData, "pinX");
+    const rawY = text(formData, "pinY");
+    const pin = rawX && rawY ? { x: Number(rawX), y: Number(rawY) } : undefined;
+    await addProofComment(await getDb(), member, text(formData, "proofId"), text(formData, "body"), pin);
   });
 }
 

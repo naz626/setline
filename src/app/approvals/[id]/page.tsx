@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { CommentForm, DecideProofForm } from "@/components/ProofForms";
+import { CommentForm, DecideProofForm, PinnableProofImage } from "@/components/ProofForms";
 import { StatusPill } from "@/components/StatusPill";
 import { can } from "@/lib/auth/permissions";
 import { requireMember } from "@/lib/auth/session";
@@ -9,7 +9,7 @@ import { getDb } from "@/lib/db/client";
 import { PROOF_LABELS, getProofDetail, versionStatus } from "@/lib/services/proofs";
 import { VERSION_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
-import { fileHref, fileSource, isUpload } from "@/lib/uploads";
+import { fileHref, fileSource, isImageFile, isUpload } from "@/lib/uploads";
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 
@@ -27,6 +27,9 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
   const status = versionStatus(proof, isLatest);
   const style = VERSION_STYLES[status];
   const kind = PROOF_LABELS[proof.kind];
+  const pinned = comments.filter((c) => c.pinX !== null && c.pinY !== null);
+  const pinNumber = new Map(pinned.map((c, i) => [c.id, i + 1]));
+  const showInline = isImageFile(proof.url);
 
   return (
     <>
@@ -47,6 +50,17 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
           <section className={`${CARD} flex flex-col gap-3`}>
             <h2 className="font-display text-xl font-bold">The file</h2>
             {proof.note && <p className="text-sm leading-relaxed">{proof.note}</p>}
+            {showInline && can(role, "proofs.comment") ? (
+              <PinnableProofImage
+                key={pinned.length}
+                proofId={proof.id}
+                src={fileHref("proof", proof.id, proof.url)}
+                pins={pinned.map((c) => ({ id: c.id, x: c.pinX!, y: c.pinY!, n: pinNumber.get(c.id)! }))}
+              />
+            ) : showInline && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={fileHref("proof", proof.id, proof.url)} alt="The proof file" className="block max-h-[70vh] max-w-full rounded-[14px] border border-line" />
+            )}
             <a href={fileHref("proof", proof.id, proof.url)} target="_blank" rel="noopener noreferrer" className="inline-flex h-12 items-center self-start rounded-xl bg-accent px-5 text-sm font-semibold text-ink">
               Open the {kind.toLowerCase()}<span className="sr-only"> (opens in a new tab)</span>
             </a>
@@ -59,7 +73,10 @@ async function Proof({ params }: { params: Promise<{ id: string }> }) {
               <ul className="flex flex-col gap-3">
                 {comments.map((comment) => (
                   <li key={comment.id} className="rounded-[14px] bg-canvas px-4 py-3">
-                    <p className="text-[13px] text-muted"><span className="font-semibold text-ink">{comment.author ?? "Someone who has left"}</span> · {formatStamp(comment.createdAt, zone)}</p>
+                    <p className="text-[13px] text-muted">
+                      <span className="font-semibold text-ink">{comment.author ?? "Someone who has left"}</span> · {formatStamp(comment.createdAt, zone)}
+                      {pinNumber.has(comment.id) && <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-ink px-1.5 text-[11px] font-bold text-white">{pinNumber.get(comment.id)}</span>}
+                    </p>
                     <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{comment.body}</p>
                   </li>
                 ))}

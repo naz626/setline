@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, date, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { PlanId } from "@/lib/plans";
 import type { ISODate, MilestoneKey, StepDurations } from "@/lib/timeline";
 
@@ -184,6 +184,9 @@ export const proofComments = pgTable("proof_comments", {
   proofId: text("proof_id").notNull().references(() => proofs.id, { onDelete: "cascade" }),
   authorId: text("author_id").references(() => users.id, { onDelete: "set null" }),
   body: text("body").notNull(),
+  /** Where on the file image this comment points, as a fraction (0 to 1) of its width and height. Null for a plain comment. */
+  pinX: real("pin_x"),
+  pinY: real("pin_y"),
   createdAt: createdAt(),
 }, (t) => [index("proof_comments_proof_idx").on(t.proofId)]);
 
