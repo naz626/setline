@@ -285,6 +285,25 @@ export const uploads = pgTable("uploads", {
   createdAt: createdAt(),
 }, (t) => [index("uploads_workspace_idx").on(t.workspaceId)]);
 
+/**
+ * A photo of a physical sample, pending the brand's decision. One row per program, overwritten on
+ * resubmission: there is no version history here, unlike proofs — a deliberately lighter flow.
+ */
+export const sampleApprovals = pgTable("sample_approvals", {
+  id: id(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  programId: text("program_id").notNull().references(() => programs.id, { onDelete: "cascade" }).unique(),
+  url: text("url").notNull(),
+  note: text("note").notNull().default(""),
+  uploadedBy: text("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+  decision: proofDecisionEnum("decision"),
+  decisionNote: text("decision_note").notNull().default(""),
+  decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: createdAt(),
+}, (t) => [index("sample_approvals_workspace_idx").on(t.workspaceId)]);
+
 export type Role = (typeof roleEnum.enumValues)[number];
 export type UserRow = typeof users.$inferSelect;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -301,5 +320,6 @@ export type GuidelineType = (typeof guidelineTypeEnum.enumValues)[number];
 export type ProgramStoreRow = typeof programStores.$inferSelect;
 export type ProgramFileRow = typeof programFiles.$inferSelect;
 export type ProgramFileKind = (typeof programFileKindEnum.enumValues)[number];
+export type SampleApprovalRow = typeof sampleApprovals.$inferSelect;
 export type ProgramChangeRow = typeof programChanges.$inferSelect;
 export type ChangeCategory = (typeof changeCategoryEnum.enumValues)[number];

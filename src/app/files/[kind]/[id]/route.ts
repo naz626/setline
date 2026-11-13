@@ -8,6 +8,7 @@ import { findGuidelineVersion } from "@/lib/services/guidelines";
 import type { Member } from "@/lib/services/member";
 import { UPLOAD_PREFIX } from "@/lib/services/programs";
 import { getProofDetail } from "@/lib/services/proofs";
+import { findSampleUrl } from "@/lib/services/samples";
 import { findStorePhoto } from "@/lib/services/stores";
 import { INLINE_TYPES, isUpload } from "@/lib/uploads";
 
@@ -18,6 +19,7 @@ async function findUrl(member: Member, kind: string, id: string): Promise<string
   if (kind === "program") return (await findProgramFile(db, member, id))?.url;
   if (kind === "guideline") return (await findGuidelineVersion(db, member, id))?.url;
   if (kind === "store") return findStorePhoto(db, member, id);
+  if (kind === "sample") return findSampleUrl(db, member, id);
   return undefined;
 }
 

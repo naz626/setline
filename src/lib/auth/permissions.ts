@@ -17,6 +17,10 @@ export const PERMISSIONS = {
   "proofs.submit": ["brandAdmin", "programManager", "designer", "vendorGuest"],
   "proofs.decide": ["brandAdmin", "programManager", "reviewer"],
   "proofs.comment": ["brandAdmin", "programManager", "designer", "reviewer", "vendorGuest"],
+  /** A lighter approval for physical sample photos, same audience as proofs. */
+  "samples.view": ["brandAdmin", "programManager", "designer", "reviewer", "vendorGuest"],
+  "samples.submit": ["brandAdmin", "programManager", "designer", "vendorGuest"],
+  "samples.decide": ["brandAdmin", "programManager", "reviewer"],
   "changes.log": ["brandAdmin", "programManager", "designer"],
   /** Confirming a change was seen: the vendor's contact, or the brand on their behalf. */
   "changes.acknowledge": ["brandAdmin", "programManager", "vendorGuest"],

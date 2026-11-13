@@ -7,7 +7,7 @@ import type { Member } from "./member";
 
 export type ActivityType =
   | "created" | "milestone" | "vendorAssigned" | "dateMoved" | "leadTimes"
-  | "vendorStatus" | "proofSent" | "proofDecided" | "file" | "details" | "change" | "store" | "retailer";
+  | "vendorStatus" | "proofSent" | "proofDecided" | "sampleSent" | "sampleDecided" | "file" | "details" | "change" | "store" | "retailer";
 
 /** Anything with insert: the database or an open transaction. */
 type Writer = Pick<Db, "insert">;
