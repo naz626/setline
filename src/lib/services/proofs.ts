@@ -90,12 +90,25 @@ export async function decideProof(db: Db, member: Member, input: { proofId: stri
   });
 }
 
-export async function addProofComment(db: Db, member: Member, proofId: string, body: string): Promise<void> {
+/** A point on the file's image, as a fraction of its width and height, for a comment pinned to a spot. */
+export interface ProofCommentPin {
+  x: number;
+  y: number;
+}
+
+export async function addProofComment(db: Db, member: Member, proofId: string, body: string, pin?: ProofCommentPin): Promise<void> {
   assertCan(member.membership.role, "proofs.comment");
   const { proof } = await findProof(db, member, proofId);
   const text = body.trim();
   if (!text || text.length > 2000) throw new InputError("Write a comment of up to 2,000 characters.");
-  await db.insert(proofComments).values({ workspaceId: member.workspace.id, proofId: proof.id, authorId: member.user.id, body: text });
+  let pinX: number | null = null;
+  let pinY: number | null = null;
+  if (pin) {
+    if (!(pin.x >= 0 && pin.x <= 1 && pin.y >= 0 && pin.y <= 1)) throw new InputError("That pin is not on the file.");
+    pinX = pin.x;
+    pinY = pin.y;
+  }
+  await db.insert(proofComments).values({ workspaceId: member.workspace.id, proofId: proof.id, authorId: member.user.id, body: text, pinX, pinY });
 }
 
 /** One proof with its sibling versions and comments, or undefined if this person may not see it. */
@@ -110,7 +123,7 @@ export async function getProofDetail(db: Db, member: Member, proofId: string) {
   const { proof, program } = found;
   const [versions, comments, [uploader]] = await Promise.all([
     db.select().from(proofs).where(and(eq(proofs.programId, program.id), eq(proofs.kind, proof.kind))).orderBy(desc(proofs.version)),
-    db.select({ id: proofComments.id, body: proofComments.body, createdAt: proofComments.createdAt, author: users.email })
+    db.select({ id: proofComments.id, body: proofComments.body, createdAt: proofComments.createdAt, author: users.email, pinX: proofComments.pinX, pinY: proofComments.pinY })
       .from(proofComments).leftJoin(users, eq(users.id, proofComments.authorId)).where(eq(proofComments.proofId, proof.id)).orderBy(asc(proofComments.createdAt)),
     proof.uploadedBy ? db.select({ email: users.email }).from(users).where(eq(users.id, proof.uploadedBy)) : Promise.resolve([]),
   ]);

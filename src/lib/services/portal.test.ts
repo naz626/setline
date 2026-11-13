@@ -167,6 +167,18 @@ describe("proofs and approvals", () => {
     expect((await getProofDetail(db, admin, quoteId))!.versions.map((v) => v.version)).toEqual([2, 1]);
   });
 
+  it("pins a comment to a spot on the file, alongside plain comments", async () => {
+    await addProofComment(db, admin, quoteId, "General note");
+    await addProofComment(db, admin, quoteId, "Fix the logo here", { x: 0.25, y: 0.6 });
+    await expect(addProofComment(db, admin, quoteId, "Off the edge", { x: 1.2, y: 0.5 })).rejects.toThrow(/not on the file/);
+    const detail = (await getProofDetail(db, admin, quoteId))!;
+    const pinned = detail.comments.find((c) => c.body === "Fix the logo here")!;
+    const plain = detail.comments.find((c) => c.body === "General note")!;
+    expect(pinned).toMatchObject({ pinX: 0.25, pinY: 0.6 });
+    expect(plain.pinX).toBeNull();
+    expect(plain.pinY).toBeNull();
+  });
+
   it("completes the key date when the next approval is approved", async () => {
     await decideProof(db, reviewer, { proofId: quoteId, decision: "approved", note: "" });
     const view = (await getProgramView(db, admin, programId))!;
