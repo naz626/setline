@@ -104,7 +104,7 @@ describe("plan limits", () => {
     await expect(inviteMember(db, admin, { email: "m5@brand.test", role: "reviewer", vendorId: "" })).rejects.toThrow(/5 brand team seats/);
     const vendorId = await createVendor(db, admin, { name: "Acme", makes: "", origin: "domestic", process: "corrugate" });
     for (const n of [1, 2, 3, 4, 5, 6]) await inviteMember(db, admin, { email: `rep${n}@acme.test`, role: "vendorGuest", vendorId });
-    await inviteMember(db, admin, { email: "buyer@retailer.test", role: "retailerGuest", vendorId: "" });
+    await inviteMember(db, admin, { email: "buyer@retailer.test", role: "retailerGuest", vendorId: "", retailer: "Northline" });
     expect((await workspaceUsage(db, admin.workspace.id)).seats).toBe(5);
   });
 

@@ -76,6 +76,8 @@ export const memberships = pgTable("memberships", {
   role: roleEnum("role").notNull(),
   /** Set for vendor guests: the one vendor whose programs they can see. */
   vendorId: text("vendor_id").references(() => vendors.id, { onDelete: "cascade" }),
+  /** Set for retailer guests: the retailer name (matched against programs.retailer) whose programs they can see. */
+  retailer: text("retailer").notNull().default(""),
   /** Kinds of notification email this person has switched off. Everything is on by default. */
   mutedNotices: jsonb("muted_notices").$type<string[]>().notNull().default([]),
   createdAt: createdAt(),
@@ -87,6 +89,8 @@ export const invitations = pgTable("invitations", {
   email: text("email").notNull(),
   role: roleEnum("role").notNull(),
   vendorId: text("vendor_id").references(() => vendors.id, { onDelete: "cascade" }),
+  /** Set for retailer guests: the retailer name they will be scoped to once they accept. */
+  retailer: text("retailer").notNull().default(""),
   invitedBy: text("invited_by").notNull().references(() => users.id),
   acceptedAt: timestamp("accepted_at", { withTimezone: true }),
   createdAt: createdAt(),

@@ -231,6 +231,7 @@ export async function inviteAction(_prev: FormState, formData: FormData): Promis
       email: text(formData, "email"),
       role: text(formData, "role"),
       vendorId: text(formData, "vendorId"),
+      retailer: text(formData, "retailer"),
     });
     let sent = false;
     if (emailConfigured()) {

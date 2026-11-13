@@ -33,6 +33,12 @@ export function InviteForm({ vendors }: { vendors: { id: string; name: string }[
             </select>
           </label>
         )}
+        {role === "retailerGuest" && (
+          <label className={`${LABEL} flex-[1_1_200px]`}>
+            Their retailer
+            <input name="retailer" required placeholder="e.g. Target" className={FIELD} />
+          </label>
+        )}
         <SubmitButton variant="accent">Send invite</SubmitButton>
       </div>
       <FormMessage state={state} />

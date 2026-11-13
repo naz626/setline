@@ -226,7 +226,7 @@ describe("uploads, install photos and retailer sign-off", () => {
   });
 
   it("marks a store installed when its photo is added, and guards who sees it", async () => {
-    await inviteMember(db, admin, { email: "buyer@retailer.test", role: "retailerGuest", vendorId: "" });
+    await inviteMember(db, admin, { email: "buyer@retailer.test", role: "retailerGuest", vendorId: "", retailer: "Northline" });
     retailer = await memberFor("buyer@retailer.test");
     const { addStores, findStorePhoto, listStores, removeStorePhoto, setStorePhoto, storeStep } = await import("./stores");
     await addStores(db, admin, id, "101, Austin TX\n102, Dallas TX");

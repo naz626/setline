@@ -73,12 +73,23 @@ export function buildProgramView(program: ProgramRow, vendor: VendorRow | undefi
   };
 }
 
-/** Vendor guests only ever see their own vendor's programs, and only once they are submitted. Everyone else sees the whole workspace. */
+/**
+ * Vendor guests only ever see their own vendor's programs, and retailer guests only their own retailer's
+ * programs, in both cases only once submitted. Everyone else sees the whole workspace.
+ */
 export function visibleTo(member: Member) {
   const inWorkspace = eq(programs.workspaceId, member.workspace.id);
-  if (member.membership.role !== "vendorGuest") return inWorkspace;
-  // A vendor guest with no vendor attached sees nothing.
-  return and(inWorkspace, eq(programs.vendorId, member.membership.vendorId ?? ""), sql`${programs.completed} ->> 'submit' is not null`);
+  const role = member.membership.role;
+  if (role === "vendorGuest") {
+    // A vendor guest with no vendor attached sees nothing.
+    return and(inWorkspace, eq(programs.vendorId, member.membership.vendorId ?? ""), sql`${programs.completed} ->> 'submit' is not null`);
+  }
+  if (role === "retailerGuest") {
+    // A retailer guest with no retailer attached sees nothing. The match ignores case so "Target" and "target" are the same retailer.
+    const retailer = member.membership.retailer ?? "";
+    return and(inWorkspace, retailer ? sql`lower(${programs.retailer}) = lower(${retailer})` : sql`false`, sql`${programs.completed} ->> 'submit' is not null`);
+  }
+  return inWorkspace;
 }
 
 async function loadContext(db: Db, { workspace }: { workspace: WorkspaceRow }) {

@@ -64,7 +64,7 @@ export async function consumeLoginToken(db: Db, token: string, now: Date = new D
   for (const invite of pending) {
     await db
       .insert(memberships)
-      .values({ workspaceId: invite.workspaceId, userId: user.id, role: invite.role, vendorId: invite.vendorId })
+      .values({ workspaceId: invite.workspaceId, userId: user.id, role: invite.role, vendorId: invite.vendorId, retailer: invite.retailer })
       .onConflictDoNothing();
     await db.update(invitations).set({ acceptedAt: now }).where(eq(invitations.id, invite.id));
   }
