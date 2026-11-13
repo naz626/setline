@@ -1,10 +1,13 @@
-import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { isBrandRole } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
-import { invitations, memberships, programs, users, workspaces } from "@/lib/db/schema";
+import { invitations, memberships, programs, uploads, users, workspaces } from "@/lib/db/schema";
 import type { Role, WorkspaceRow } from "@/lib/db/schema";
-import { FOUNDING_PLACES, TRIAL_DAYS, TRIAL_EXTENSION_DAYS, TRIAL_REMINDER_DAYS, isPlanId, planState, trialDay } from "@/lib/plans";
+import {
+  DATA_RETENTION_DAYS, DELETION_WARNING_DAYS, FOUNDING_PLACES, TRIAL_DAYS, TRIAL_EXTENSION_DAYS, TRIAL_REMINDER_DAYS, isPlanId, planState, trialDay,
+} from "@/lib/plans";
 import type { PlanState } from "@/lib/plans";
+import { uploadsConfigured } from "@/lib/uploads";
 import { InputError } from "./errors";
 import type { Member } from "./member";
 
@@ -111,7 +114,8 @@ export async function extendTrial(db: Db, operatorEmail: string, workspaceId: st
   if (workspace.plan !== "trial") throw new InputError("That workspace is not on a trial.");
   if (workspace.trialExtended) throw new InputError("That trial has already had its one extension.");
   const from = Math.max(workspace.trialEndsAt.getTime(), now.getTime());
-  await db.update(workspaces).set({ trialEndsAt: new Date(from + TRIAL_EXTENSION_DAYS * 86_400_000), trialExtended: true }).where(eq(workspaces.id, workspaceId));
+  // Pushing the trial out means its deletion clock restarts too, so a deletion warning already sent no longer applies.
+  await db.update(workspaces).set({ trialEndsAt: new Date(from + TRIAL_EXTENSION_DAYS * 86_400_000), trialExtended: true, deletionWarnedAt: null }).where(eq(workspaces.id, workspaceId));
 }
 
 export async function setFounding(db: Db, operatorEmail: string, workspaceId: string, founding: boolean): Promise<void> {
@@ -157,4 +161,57 @@ export async function markTrialReminderSent(db: Db, reminder: TrialReminder): Pr
   // Sending a later reminder also closes the earlier ones.
   const done = keys.slice(0, keys.indexOf(reminder.key) + 1);
   await db.update(workspaces).set({ trialReminders: [...new Set([...reminder.workspace.trialReminders, ...done])] }).where(eq(workspaces.id, reminder.workspace.id));
+}
+
+/* Deleting a workspace's data once its trial has been expired, unpaid, for DATA_RETENTION_DAYS.
+   A single warning email goes out DELETION_WARNING_DAYS before that, same shape as the trial reminders. */
+
+const retentionCutoff = (now: Date) => new Date(now.getTime() - DATA_RETENTION_DAYS * 86_400_000);
+const warningCutoff = (now: Date) => new Date(now.getTime() - (DATA_RETENTION_DAYS - DELETION_WARNING_DAYS) * 86_400_000);
+
+export interface DeletionWarning {
+  workspace: WorkspaceRow;
+  daysLeft: number;
+  to: string[];
+}
+
+/** Trial workspaces whose read-only grace period ends soon and have not yet been warned. */
+export async function dueForDeletionWarning(db: Db, now: Date = new Date()): Promise<DeletionWarning[]> {
+  const rows = await db.select().from(workspaces).where(and(eq(workspaces.plan, "trial"), isNull(workspaces.deletionWarnedAt), lt(workspaces.trialEndsAt, warningCutoff(now))));
+  return Promise.all(rows.map(async (workspace) => {
+    const daysSinceExpiry = Math.floor((now.getTime() - workspace.trialEndsAt.getTime()) / 86_400_000);
+    const daysLeft = Math.max(DATA_RETENTION_DAYS - daysSinceExpiry, 0);
+    const admins = await db.select({ email: users.email }).from(memberships).innerJoin(users, eq(users.id, memberships.userId))
+      .where(and(eq(memberships.workspaceId, workspace.id), eq(memberships.role, "brandAdmin")));
+    return { workspace, daysLeft, to: admins.map((a) => a.email) };
+  }));
+}
+
+export async function markDeletionWarned(db: Db, workspaceId: string): Promise<void> {
+  await db.update(workspaces).set({ deletionWarnedAt: new Date() }).where(eq(workspaces.id, workspaceId));
+}
+
+/** Trial workspaces that have been unpaid and read-only for the full retention period. */
+export async function dueForDeletion(db: Db, now: Date = new Date()): Promise<WorkspaceRow[]> {
+  return db.select().from(workspaces).where(and(eq(workspaces.plan, "trial"), lt(workspaces.trialEndsAt, retentionCutoff(now))));
+}
+
+/**
+ * Deletes a workspace and everything in it: programs, vendors, guidelines, members, uploaded files
+ * and all. Every table that holds a workspace's data cascades from the workspace row (see schema.ts),
+ * except the files themselves in file storage, which are deleted here first, best-effort.
+ */
+export async function deleteWorkspace(db: Db, workspaceId: string): Promise<void> {
+  if (uploadsConfigured()) {
+    const rows = await db.select({ pathname: uploads.pathname }).from(uploads).where(eq(uploads.workspaceId, workspaceId));
+    if (rows.length > 0) {
+      try {
+        const { del } = await import("@vercel/blob");
+        await del(rows.map((r) => r.pathname));
+      } catch {
+        // Storage may already be gone or unreachable; the workspace is still deleted below.
+      }
+    }
+  }
+  await db.delete(workspaces).where(eq(workspaces.id, workspaceId));
 }

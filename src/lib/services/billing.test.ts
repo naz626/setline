@@ -3,12 +3,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { consumeLoginToken, createLoginToken } from "@/lib/auth/core";
 import { createLocalDb } from "@/lib/db/client";
 import type { Db } from "@/lib/db/client";
-import { workspaces } from "@/lib/db/schema";
+import { programs, vendors, workspaces } from "@/lib/db/schema";
 import { addDays } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
 import {
-  ReadOnlyError, assertWritable, dueTrialReminders, extendTrial, isOperator, listWorkspacesForOperator, markTrialReminderSent, memberPlanState,
-  setFounding, setWorkspacePlan, workspaceUsage,
+  ReadOnlyError, assertWritable, deleteWorkspace, dueForDeletion, dueForDeletionWarning, dueTrialReminders, extendTrial, isOperator,
+  listWorkspacesForOperator, markDeletionWarned, markTrialReminderSent, memberPlanState, setFounding, setWorkspacePlan, workspaceUsage,
 } from "./billing";
 import { InputError } from "./errors";
 import { findMember } from "./member";
@@ -176,5 +176,59 @@ describe("plan limits", () => {
     await expect(setFounding(db, OPERATOR, made[10].workspace.id, true)).rejects.toThrow(/All 10 founding places/);
     await setFounding(db, OPERATOR, made[0].workspace.id, false);
     await setFounding(db, OPERATOR, made[10].workspace.id, true);
+  });
+});
+
+describe("deleting unpaid workspaces", () => {
+  const DAY = 86_400_000;
+  // A minute of slack past the exact day boundary, so the comparison in dueForDeletion(Warning) isn't a coin flip on timing.
+  const daysAgo = (n: number) => new Date(Date.now() - n * DAY - 60_000);
+
+  it("warns once, 7 days before the 60-day cutoff, then deletes once it is reached", async () => {
+    const member = await newWorkspace("owner@expired.test", "Expired Brand");
+    const vendorId = await createVendor(db, member, { name: "V", makes: "", origin: "domestic", process: "print" });
+    const programId = await program(member, "P1", { vendorId });
+
+    expect(await dueForDeletionWarning(db)).toHaveLength(0); // trial has not even ended yet
+    await expect(dueForDeletion(db)).resolves.toEqual([]);
+
+    // 53 days unpaid since expiry: 7 days left before the 60-day cutoff, so the warning is now due.
+    await db.update(workspaces).set({ trialEndsAt: daysAgo(53) }).where(eq(workspaces.id, member.workspace.id));
+    const [warning] = await dueForDeletionWarning(db);
+    expect(warning).toMatchObject({ daysLeft: 7, to: ["owner@expired.test"] });
+    await expect(dueForDeletion(db)).resolves.toEqual([]); // not due for deletion yet
+
+    await markDeletionWarned(db, member.workspace.id);
+    expect(await dueForDeletionWarning(db)).toHaveLength(0); // sent once
+
+    // 61 days unpaid: past the 60-day cutoff.
+    await db.update(workspaces).set({ trialEndsAt: daysAgo(61) }).where(eq(workspaces.id, member.workspace.id));
+    const due = await dueForDeletion(db);
+    expect(due.map((w) => w.id)).toContain(member.workspace.id);
+
+    await deleteWorkspace(db, member.workspace.id);
+    const [gone] = await db.select().from(workspaces).where(eq(workspaces.id, member.workspace.id));
+    expect(gone).toBeUndefined();
+    // Everything that hung off the workspace is gone too, cascaded from the workspace row.
+    expect(await db.select().from(vendors).where(eq(vendors.id, vendorId))).toHaveLength(0);
+    expect(await db.select().from(programs).where(eq(programs.id, programId))).toHaveLength(0);
+  });
+
+  it("resets the deletion warning when a trial is extended", async () => {
+    const member = await newWorkspace("owner@extend2.test", "Extend Brand 2");
+    await db.update(workspaces).set({ trialEndsAt: daysAgo(54), deletionWarnedAt: new Date() }).where(eq(workspaces.id, member.workspace.id));
+    expect(await dueForDeletionWarning(db)).toHaveLength(0); // already warned
+    await extendTrial(db, OPERATOR, member.workspace.id);
+    expect(await dueForDeletionWarning(db)).toHaveLength(0); // pushed out, nowhere near the new warning window
+    const [refreshed] = await db.select().from(workspaces).where(eq(workspaces.id, member.workspace.id));
+    expect(refreshed.deletionWarnedAt).toBeNull();
+  });
+
+  it("never deletes a workspace that paid before its grace period ran out", async () => {
+    const member = await newWorkspace("owner@paid.test", "Paid In Time");
+    await db.update(workspaces).set({ trialEndsAt: daysAgo(61) }).where(eq(workspaces.id, member.workspace.id));
+    await setWorkspacePlan(db, OPERATOR, member.workspace.id, "starter");
+    const due = await dueForDeletion(db);
+    expect(due.map((w) => w.id)).not.toContain(member.workspace.id);
   });
 });

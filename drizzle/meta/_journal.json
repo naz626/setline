@@ -57,6 +57,13 @@
       "when": 1794576204189,
       "tag": "0007_fearless_ozymandias",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794576504507,
+      "tag": "0008_simple_moonstone",
+      "breakpoints": true
     }
   ]
 }
