@@ -5,6 +5,7 @@ import { assertCan } from "@/lib/auth/permissions";
 import type { Db } from "@/lib/db/client";
 import { memberships, workspaces } from "@/lib/db/schema";
 import type { Role, WorkspaceRow } from "@/lib/db/schema";
+import { assertAlertsIncluded } from "./billing";
 import { InputError } from "./errors";
 import type { Member } from "./member";
 
@@ -35,6 +36,7 @@ export async function setAlertWebhook(db: Db, member: Member, value: string): Pr
   const trimmed = value.trim();
   let alertWebhookUrl: string | null = null;
   if (trimmed !== "") {
+    assertAlertsIncluded(member);
     let url: URL | undefined;
     try {
       url = new URL(trimmed);
@@ -53,6 +55,7 @@ export async function setAlertWebhook(db: Db, member: Member, value: string): Pr
  */
 export async function createCalendarToken(db: Db, member: Member): Promise<string> {
   assertCan(member.membership.role, "integrations.manage");
+  assertAlertsIncluded(member);
   const token = randomBytes(24).toString("base64url");
   await db.update(workspaces).set({ calendarTokenHash: hashToken(token) }).where(eq(workspaces.id, member.workspace.id));
   return token;

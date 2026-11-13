@@ -36,6 +36,13 @@
       "when": 1794511685851,
       "tag": "0004_shiny_bloodstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794520560208,
+      "tag": "0005_spicy_mandarin",
+      "breakpoints": true
     }
   ]
 }

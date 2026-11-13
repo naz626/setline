@@ -164,7 +164,11 @@ Default milestones and durations used in the sample data. These are placeholders
 - Guided tour (`src/components/Tour.tsx`): five stops, opens once per browser on the Programs page, replayable from "Take the tour"
 - Integrations that work today: Slack or Teams incoming-webhook alerts, a secret calendar feed at `/calendar/<secret>.ics`, and pasting programs from a spreadsheet
 
-Still not built: pinned comments on proofs, sample-photo approvals, the retailer guest view scoped to their own programs, and connections that need a partner or an OAuth app: Esko WebCenter, PageProof, Asana, Smartsheet, monday.com, Drive, Dropbox, OneDrive, EDI ship notices and carrier tracking.
+- Plans and trial (`src/lib/plans.ts`, `src/lib/services/billing.ts`): every workspace starts on a 30-day trial with Team features. When it ends the workspace is read-only (`assertWritable`, called from the action helpers `attempt` and `quietly` and from the upload route). Starter caps brand seats at 5 and open programs at 15; guests are never counted. Alerts and the calendar feed need Team or a trial.
+- `/settings/billing` shows the trial, usage and plans. There is no card checkout: an operator sets the plan by hand at `/operator`, which only people listed in `SETLINE_OPERATOR_EMAILS` can open. Operators can also give the one 14-day trial extension and the founding offer (10 places).
+- Trial reminder emails on day 20 and day 28, sent by a daily Vercel cron (`vercel.json`, `/api/cron/trial-reminders`, protected by `CRON_SECRET`).
+
+Still not built: card checkout (Stripe), storage limits per plan, deleting data 60 days after a trial ends, pinned comments on proofs, sample-photo approvals, the retailer guest view scoped to their own programs, and connections that need a partner or an OAuth app: Esko WebCenter, PageProof, Asana, Smartsheet, monday.com, Drive, Dropbox, OneDrive, EDI ship notices and carrier tracking.
 
 Decisions made while building, which differ from the first draft of this brief:
 

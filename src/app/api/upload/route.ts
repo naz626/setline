@@ -3,6 +3,7 @@ import type { HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
 import { can } from "@/lib/auth/permissions";
 import { getCurrentMember } from "@/lib/auth/session";
+import { assertWritable } from "@/lib/services/billing";
 import { uploadFolder } from "@/lib/services/programs";
 import { MAX_UPLOAD_BYTES, UPLOAD_TYPES, uploadsConfigured } from "@/lib/uploads";
 
@@ -21,6 +22,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         const member = await getCurrentMember();
         if (!member) throw new Error("Sign in to upload files.");
         if (!can(member.membership.role, "files.upload")) throw new Error("Your role cannot upload files.");
+        assertWritable(member);
         if (!pathname.startsWith(uploadFolder(member.workspace.id)) || pathname.includes("..")) throw new Error("That upload is not allowed.");
         return { allowedContentTypes: UPLOAD_TYPES, maximumSizeInBytes: MAX_UPLOAD_BYTES, addRandomSuffix: true };
       },

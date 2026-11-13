@@ -10,6 +10,7 @@ import { SESSION_COOKIE, requireMember, requireUser } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { emailConfigured, sendEmail } from "@/lib/email";
 import { acknowledgeChange, logChange } from "@/lib/services/changes";
+import { ReadOnlyError, assertWritable, extendTrial, setFounding, setWorkspacePlan } from "@/lib/services/billing";
 import { InputError } from "@/lib/services/errors";
 import { createCalendarToken, removeCalendarToken, setAlertWebhook, setNoticePreferences } from "@/lib/services/settings";
 import { addProgramFile, removeProgramFile } from "@/lib/services/files";
@@ -39,7 +40,7 @@ const text = (formData: FormData, name: string) => String(formData.get(name) ?? 
 
 /** Turns expected problems into a message for the form. Anything unexpected is rethrown. */
 function failure(error: unknown): FormState {
-  if (error instanceof InputError || error instanceof AuthError || error instanceof ForbiddenError) {
+  if (error instanceof InputError || error instanceof AuthError || error instanceof ForbiddenError || error instanceof ReadOnlyError) {
     return { error: error.message };
   }
   throw error;
@@ -151,6 +152,7 @@ export async function createProgramAction(_prev: FormState, formData: FormData):
   const submitNow = text(formData, "intent") === "submit";
   let id: string;
   try {
+    assertWritable(member);
     id = await createProgram(await getDb(), member, {
       name: text(formData, "name"),
       retailer: text(formData, "retailer"),
@@ -172,6 +174,7 @@ export async function createProgramAction(_prev: FormState, formData: FormData):
 export async function completeMilestoneAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const member = await requireMember();
   try {
+    assertWritable(member);
     await completeNextMilestone(await getDb(), member, text(formData, "programId"), text(formData, "milestone"));
   } catch (error) {
     return failure(error);
@@ -254,6 +257,7 @@ export async function revokeInviteAction(formData: FormData): Promise<void> {
 async function quietly(run: (member: Awaited<ReturnType<typeof requireMember>>) => Promise<unknown>): Promise<void> {
   const member = await requireMember();
   try {
+    assertWritable(member);
     await run(member);
   } catch (error) {
     failure(error);
@@ -262,9 +266,11 @@ async function quietly(run: (member: Awaited<ReturnType<typeof requireMember>>) 
 }
 
 /** Runs a change and reports the result to the form. */
-async function attempt(run: (member: Awaited<ReturnType<typeof requireMember>>) => Promise<string | void>): Promise<FormState> {
+async function attempt(run: (member: Awaited<ReturnType<typeof requireMember>>) => Promise<string | void>, options: { whenReadOnly?: boolean } = {}): Promise<FormState> {
   const member = await requireMember();
   try {
+    // Every change stops when a trial has ended, except the few that are about the person, not the workspace's work.
+    if (!options.whenReadOnly) assertWritable(member);
     const message = await run(member);
     refresh();
     return message ? { message } : {};
@@ -465,7 +471,7 @@ export async function saveNoticePreferencesAction(_prev: FormState, formData: Fo
   return attempt(async (member) => {
     await setNoticePreferences(await getDb(), member, formData.getAll("notice").filter((value): value is string => typeof value === "string"));
     return "Saved.";
-  });
+  }, { whenReadOnly: true });
 }
 
 export async function setAlertWebhookAction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -479,6 +485,7 @@ export async function setAlertWebhookAction(_prev: FormState, formData: FormData
 export async function createCalendarLinkAction(): Promise<FormState> {
   const member = await requireMember();
   try {
+    assertWritable(member);
     const token = await createCalendarToken(await getDb(), member);
     refresh();
     return { message: "Copy this address into your calendar app now. It is shown only once.", secret: `${await baseUrl()}/calendar/${token}.ics` };
@@ -496,4 +503,22 @@ export async function importProgramsAction(_prev: FormState, formData: FormData)
     const { created } = await importPrograms(await getDb(), member, text(formData, "rows"));
     return `Imported ${created} ${created === 1 ? "program" : "programs"} as plans.`;
   });
+}
+
+/** Operator controls: set by hand until card checkout exists. The services check the operator list again. */
+export async function operatorAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const db = await getDb();
+  const workspaceId = text(formData, "workspaceId");
+  try {
+    const intent = text(formData, "intent");
+    if (intent === "plan") await setWorkspacePlan(db, user.email, workspaceId, text(formData, "plan"));
+    else if (intent === "extend") await extendTrial(db, user.email, workspaceId);
+    else if (intent === "founding") await setFounding(db, user.email, workspaceId, text(formData, "founding") === "on");
+    else throw new InputError("Unknown action.");
+  } catch (error) {
+    return failure(error);
+  }
+  refresh();
+  return { message: "Saved." };
 }

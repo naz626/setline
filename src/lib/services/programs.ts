@@ -24,6 +24,7 @@ import {
 import type { Health, ISODate, LeadTimeProfile, MilestoneKey, ResolvedLeadTimes, Schedule, Stage, StepDurations, VendorState } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
 import { recordActivity } from "./activity";
+import { assertProgramRoom } from "./billing";
 import { InputError } from "./errors";
 import { listProfiles, parseSteps, toEngineProfile } from "./leadTimes";
 import type { StepInput } from "./leadTimes";
@@ -249,6 +250,7 @@ export async function createProgram(db: Db, member: Member, input: NewProgramInp
     return { kind: file.kind as ProgramFileKind, url: parseLink(file.url, "Each file link", member.workspace.id) };
   });
   if (input.submitNow && !vendorId) throw new InputError("Choose a vendor before submitting, or save the program as a plan.");
+  await assertProgramRoom(db, member);
   const today = todayInZone(member.workspace.timezone);
   return db.transaction(async (tx) => {
     const [created] = await tx

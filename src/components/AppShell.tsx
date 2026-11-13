@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { signOut } from "@/app/actions";
 import { getCurrentMember } from "@/lib/auth/session";
+import { isOperator, memberPlanState } from "@/lib/services/billing";
 import { uploadFolder } from "@/lib/services/programs";
 import { uploadsConfigured } from "@/lib/uploads";
 import { UploadsProvider } from "./FileField";
@@ -42,6 +43,8 @@ async function NavUser() {
   return (
     <form action={signOut} className="ml-auto flex items-center gap-3">
       <span className="hidden text-[13px] text-muted 2xl:inline">{member.workspace.name} · {member.user.email}</span>
+      {isOperator(member.user.email) && <Link href="/operator" className="inline-flex h-11 items-center px-1 text-[13px] font-semibold text-muted hover:text-accent-text">Operator</Link>}
+      {member.membership.role === "brandAdmin" && <Link href="/settings/billing" className="inline-flex h-11 items-center px-1 text-[13px] font-semibold text-muted hover:text-accent-text">Billing</Link>}
       <Link href="/settings/notifications" className="inline-flex h-11 items-center px-1 text-[13px] font-semibold text-muted hover:text-accent-text">Notifications</Link>
       <button type="submit" className="h-11 rounded-[10px] border-[1.5px] border-ink px-3.5 text-[13px] font-semibold">Sign out</button>
     </form>
@@ -52,6 +55,30 @@ async function NavUser() {
 async function WithUploads({ children }: { children: React.ReactNode }) {
   const member = uploadsConfigured() ? await getCurrentMember() : undefined;
   return <UploadsProvider folder={member ? uploadFolder(member.workspace.id) : undefined}>{children}</UploadsProvider>;
+}
+
+/** Tells people when a trial is close to ending, and everyone when the workspace has gone read-only. */
+async function PlanBanner() {
+  const member = await getCurrentMember();
+  if (!member) return null;
+  const state = memberPlanState(member);
+  const admin = member.membership.role === "brandAdmin";
+  if (state.status === "expired") {
+    return (
+      <p role="status" className="rounded-[14px] bg-[#FADDDB] px-4 py-3 text-sm font-medium text-[#9B1C1C]">
+        The free trial has ended, so this workspace is read-only. Nothing has been deleted.{" "}
+        {admin ? <Link href="/settings/billing" className="font-semibold underline">Choose a plan</Link> : "Its admin can choose a plan to switch it back on."}
+      </p>
+    );
+  }
+  if (state.status === "trialing" && admin && (state.trialDaysLeft ?? 99) <= 10) {
+    return (
+      <p role="status" className="rounded-[14px] bg-[#FCEBC7] px-4 py-3 text-sm font-medium text-[#7A4B00]">
+        Your free trial ends in {state.trialDaysLeft} {state.trialDaysLeft === 1 ? "day" : "days"}. <Link href="/settings/billing" className="font-semibold underline">See the plans</Link>
+      </p>
+    );
+  }
+  return null;
 }
 
 function Loading() {
@@ -74,7 +101,7 @@ export function AppShell({ active, children }: { active: string; children: React
             <span className="h-3 w-3 rounded-full bg-accent" aria-hidden="true" />
             <span className="font-display text-[22px] font-bold tracking-tight">setline</span>
           </Link>
-          <nav aria-label="Main" className="order-last flex w-full flex-wrap gap-1 text-sm font-medium lg:order-none lg:w-auto lg:flex-1">
+          <nav aria-label="Main" className="order-last flex w-full flex-wrap gap-1 text-sm font-medium">
             <Suspense fallback={null}>
               <NavLinks active={active} />
             </Suspense>
@@ -85,6 +112,9 @@ export function AppShell({ active, children }: { active: string; children: React
         </div>
       </header>
       <main className="mx-auto flex max-w-[1200px] flex-col gap-6 px-6 pt-8 pb-12">
+        <Suspense fallback={null}>
+          <PlanBanner />
+        </Suspense>
         <Suspense fallback={<Loading />}><WithUploads>{children}</WithUploads></Suspense>
       </main>
     </>
