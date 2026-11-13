@@ -11,7 +11,7 @@ import type { Member } from "./member";
 export async function listMembers(db: Db, member: Member) {
   assertBrand(member.membership.role);
   return db
-    .select({ id: memberships.id, role: memberships.role, email: users.email, userId: users.id, vendorName: vendors.name })
+    .select({ id: memberships.id, role: memberships.role, email: users.email, userId: users.id, vendorName: vendors.name, retailer: memberships.retailer })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .leftJoin(vendors, eq(vendors.id, memberships.vendorId))
@@ -21,7 +21,7 @@ export async function listMembers(db: Db, member: Member) {
 
 export async function listPendingInvitations(db: Db, member: Member) {
   return db
-    .select({ id: invitations.id, email: invitations.email, role: invitations.role, vendorName: vendors.name })
+    .select({ id: invitations.id, email: invitations.email, role: invitations.role, vendorName: vendors.name, retailer: invitations.retailer })
     .from(invitations)
     .leftJoin(vendors, eq(vendors.id, invitations.vendorId))
     .where(and(eq(invitations.workspaceId, member.workspace.id), isNull(invitations.acceptedAt)))
@@ -29,7 +29,7 @@ export async function listPendingInvitations(db: Db, member: Member) {
 }
 
 /** Invites someone by email. They join with this role the first time they sign in with that address. */
-export async function inviteMember(db: Db, member: Member, input: { email: string; role: string; vendorId: string }): Promise<{ email: string }> {
+export async function inviteMember(db: Db, member: Member, input: { email: string; role: string; vendorId: string; retailer?: string }): Promise<{ email: string }> {
   // Program managers run vendor relationships, so they may invite a vendor's contact, but nobody else.
   assertCan(member.membership.role, input.role === "vendorGuest" ? "vendors.manage" : "members.invite");
   let email: string;
@@ -43,10 +43,15 @@ export async function inviteMember(db: Db, member: Member, input: { email: strin
   await assertSeatAvailable(db, member, role);
 
   let vendorId: string | null = null;
+  let retailer = "";
   if (role === "vendorGuest") {
     const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, input.vendorId), eq(vendors.workspaceId, member.workspace.id)));
     if (!vendor) throw new InputError("Choose which vendor this guest belongs to.");
     vendorId = vendor.id;
+  }
+  if (role === "retailerGuest") {
+    retailer = (input.retailer ?? "").trim();
+    if (!retailer) throw new InputError("Enter the retailer this guest belongs to.");
   }
 
   const [existing] = await db
@@ -58,8 +63,8 @@ export async function inviteMember(db: Db, member: Member, input: { email: strin
 
   await db
     .insert(invitations)
-    .values({ workspaceId: member.workspace.id, email, role, vendorId, invitedBy: member.user.id })
-    .onConflictDoUpdate({ target: [invitations.workspaceId, invitations.email], set: { role, vendorId, invitedBy: member.user.id, acceptedAt: null } });
+    .values({ workspaceId: member.workspace.id, email, role, vendorId, retailer, invitedBy: member.user.id })
+    .onConflictDoUpdate({ target: [invitations.workspaceId, invitations.email], set: { role, vendorId, retailer, invitedBy: member.user.id, acceptedAt: null } });
   return { email };
 }
 

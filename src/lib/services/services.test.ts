@@ -108,6 +108,26 @@ describe("roles and scoping", () => {
     await expect(inviteMember(db, admin, { email: "x@y.test", role: "vendorGuest", vendorId: "" })).rejects.toThrow(InputError);
   });
 
+  it("shows retailer guests only their own retailer's submitted programs", async () => {
+    const id = await createProgram(db, admin, { name: "Northline Endcap", retailer: "Northline", displayType: "Endcap", storeCount: "", inStoreDate: "2027-08-01", vendorId: "" });
+    const unsubmitted = await createProgram(db, admin, { name: "Northline Not Yet", retailer: "Northline", displayType: "Endcap", storeCount: "", inStoreDate: "2027-09-01", vendorId: "" });
+    await completeNextMilestone(db, admin, id, "submit");
+    await inviteMember(db, admin, { email: "contact@northline.test", role: "retailerGuest", vendorId: "", retailer: "northline" });
+    const guest = await memberFor("contact@northline.test");
+    const visible = await listProgramViews(db, guest);
+    expect(visible.length).toBeGreaterThan(0);
+    expect(visible.every((v) => v.program.retailer.toLowerCase() === "northline")).toBe(true);
+    expect(visible.some((v) => v.program.id === id)).toBe(true);
+    // Case-insensitive match, and not visible until submitted.
+    expect(await getProgramView(db, guest, unsubmitted)).toBeUndefined();
+    const [other] = (await listProgramViews(db, admin)).filter((v) => v.program.retailer.toLowerCase() !== "northline");
+    expect(await getProgramView(db, guest, other.program.id)).toBeUndefined();
+  });
+
+  it("requires a retailer for retailer guests", async () => {
+    await expect(inviteMember(db, admin, { email: "y@z.test", role: "retailerGuest", vendorId: "" })).rejects.toThrow(InputError);
+  });
+
   it("keeps workspaces apart", async () => {
     const { user } = await signIn("other@elsewhere.test");
     await createWorkspace(db, user, { name: "Elsewhere", timezone: "UTC", withSamples: false });

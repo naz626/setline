@@ -46,7 +46,7 @@ async function Team() {
               {members.map((m) => (
                 <tr key={m.id} className="border-b border-line last:border-b-0">
                   <td className="py-3.5 pr-4 font-semibold">{m.email}{m.userId === member.user.id && " (you)"}</td>
-                  <td className="py-3.5 pr-4">{ROLE_LABELS[m.role]}{m.vendorName && ` · ${m.vendorName}`}</td>
+                  <td className="py-3.5 pr-4">{ROLE_LABELS[m.role]}{m.vendorName && ` · ${m.vendorName}`}{m.retailer && ` · ${m.retailer}`}</td>
                   <td className="py-3.5 pr-4 text-[13px] text-muted">{ROLE_SUMMARY[m.role]}</td>
                   <td className="py-3.5 text-[13px] font-semibold text-[#14633F]">Active</td>
                 </tr>
@@ -54,7 +54,7 @@ async function Team() {
               {invitations.map((invite) => (
                 <tr key={invite.id} className="border-b border-line last:border-b-0">
                   <td className="py-3.5 pr-4 font-semibold">{invite.email}</td>
-                  <td className="py-3.5 pr-4">{ROLE_LABELS[invite.role]}{invite.vendorName && ` · ${invite.vendorName}`}</td>
+                  <td className="py-3.5 pr-4">{ROLE_LABELS[invite.role]}{invite.vendorName && ` · ${invite.vendorName}`}{invite.retailer && ` · ${invite.retailer}`}</td>
                   <td className="py-3.5 pr-4 text-[13px] text-muted">{ROLE_SUMMARY[invite.role]}</td>
                   <td className="py-3.5">
                     <form action={revokeInviteAction} className="flex items-center gap-3">

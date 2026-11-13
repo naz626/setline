@@ -52,7 +52,7 @@ beforeAll(async () => {
   otherId = await createVendor(db, admin, { name: "Other Print", makes: "", origin: "overseas", process: "print" });
   await inviteMember(db, admin, { email: "pm@brand.test", role: "programManager", vendorId: "" });
   await inviteMember(db, admin, { email: "reviewer@brand.test", role: "reviewer", vendorId: "" });
-  await inviteMember(db, admin, { email: "store@retailer.test", role: "retailerGuest", vendorId: "" });
+  await inviteMember(db, admin, { email: "store@retailer.test", role: "retailerGuest", vendorId: "", retailer: "Northline" });
   manager = await memberFor("pm@brand.test");
   reviewer = await memberFor("reviewer@brand.test");
   retailer = await memberFor("store@retailer.test");
