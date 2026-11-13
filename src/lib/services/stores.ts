@@ -8,6 +8,7 @@ import { InputError } from "./errors";
 import type { Member } from "./member";
 import { recordActivity } from "./activity";
 import { findVisibleProgram, parseLink } from "./programs";
+import { forgetUpload } from "./storage";
 
 export const STORE_STEPS = ["shipped", "delivered", "installed"] as const;
 export type StoreStep = (typeof STORE_STEPS)[number];
@@ -117,6 +118,8 @@ export async function setStorePhoto(db: Db, member: Member, storeId: string, pho
     await tx.update(programStores).set({ ...steps, photoUrl, photoAt: new Date(), photoBy: member.user.id }).where(eq(programStores.id, store.id));
     await recordActivity(tx, member, store.programId, "store", `Added an install photo for store ${store.storeNumber}`);
   });
+  // A replaced photo frees the old one's storage.
+  if (store.photoUrl && store.photoUrl !== photoUrl) await forgetUpload(db, store.photoUrl);
 }
 
 /** Removes a store's photo. The install date stays; use undo to take that back. */
@@ -128,6 +131,7 @@ export async function removeStorePhoto(db: Db, member: Member, storeId: string):
     await tx.update(programStores).set({ photoUrl: null, photoAt: null, photoBy: null }).where(eq(programStores.id, store.id));
     await recordActivity(tx, member, store.programId, "store", `Removed the install photo for store ${store.storeNumber}`);
   });
+  await forgetUpload(db, store.photoUrl);
 }
 
 /** The saved photo reference for a store, if this person may see the store's program. */

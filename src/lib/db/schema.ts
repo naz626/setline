@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, date, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { PlanId } from "@/lib/plans";
 import type { ISODate, MilestoneKey, StepDurations } from "@/lib/timeline";
 
@@ -268,6 +268,17 @@ export const programChanges = pgTable("program_changes", {
   acknowledgedBy: text("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
   acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
 }, (t) => [index("program_changes_program_idx").on(t.programId)]);
+
+/**
+ * One uploaded file's size, kept so storage usage can be enforced per plan without re-listing the
+ * file store. Written when an upload finishes; removed when the file it backs is deleted.
+ */
+export const uploads = pgTable("uploads", {
+  pathname: text("pathname").primaryKey(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  bytes: bigint("bytes", { mode: "number" }).notNull(),
+  createdAt: createdAt(),
+}, (t) => [index("uploads_workspace_idx").on(t.workspaceId)]);
 
 export type Role = (typeof roleEnum.enumValues)[number];
 export type UserRow = typeof users.$inferSelect;

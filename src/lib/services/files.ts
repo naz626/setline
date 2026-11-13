@@ -7,6 +7,7 @@ import { recordActivity } from "./activity";
 import { InputError } from "./errors";
 import type { Member } from "./member";
 import { findVisibleProgram, parseLink } from "./programs";
+import { forgetUpload } from "./storage";
 
 export const FILE_KINDS = programFileKindEnum.enumValues;
 export const FILE_LABELS: Record<ProgramFileKind, string> = {
@@ -50,6 +51,7 @@ export async function removeProgramFile(db: Db, member: Member, fileId: string):
     await tx.delete(programFiles).where(eq(programFiles.id, file.id));
     await recordActivity(tx, member, file.programId, "file", `Removed a file: ${FILE_LABELS[file.kind]}`);
   });
+  await forgetUpload(db, file.url);
 }
 
 /** One file, if this person may see its program. */
