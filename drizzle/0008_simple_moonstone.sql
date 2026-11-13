@@ -1,0 +1,1 @@
+ALTER TABLE "workspaces" ADD COLUMN "deletion_warned_at" timestamp with time zone;

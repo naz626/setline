@@ -55,6 +55,8 @@ export const workspaces = pgTable("workspaces", {
   founding: boolean("founding").notNull().default(false),
   /** Trial reminder emails already sent ("day20", "day28"), so each goes out once. */
   trialReminders: jsonb("trial_reminders").$type<string[]>().notNull().default([]),
+  /** When the "your data will be deleted soon" warning was sent, 7 days before deletion. Sent once. */
+  deletionWarnedAt: timestamp("deletion_warned_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
 

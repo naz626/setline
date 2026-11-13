@@ -25,6 +25,10 @@ export const FOUNDING_PLACES = 10;
 export const FOUNDING_DISCOUNT = 0.5;
 /** Days into the trial when a reminder goes out. */
 export const TRIAL_REMINDER_DAYS = [20, 28] as const;
+/** How long a workspace stays read-only after its trial ends before its data is deleted. */
+export const DATA_RETENTION_DAYS = 60;
+/** How many days before deletion the one warning email goes out. */
+export const DELETION_WARNING_DAYS = 7;
 
 export const PLANS: Record<PlanId, Plan> = {
   // A trial has everything the Team plan has.
