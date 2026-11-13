@@ -57,8 +57,11 @@ export const workspaces = pgTable("workspaces", {
   trialReminders: jsonb("trial_reminders").$type<string[]>().notNull().default([]),
   /** When the "your data will be deleted soon" warning was sent, 7 days before deletion. Sent once. */
   deletionWarnedAt: timestamp("deletion_warned_at", { withTimezone: true }),
+  /** Set once this workspace has paid by card through Stripe. Used to open the billing portal and to match webhooks. */
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
   createdAt: createdAt(),
-});
+}, (t) => [uniqueIndex("workspaces_stripe_customer_idx").on(t.stripeCustomerId)]);
 
 export const vendors = pgTable("vendors", {
   id: id(),
