@@ -18,7 +18,7 @@ export const UPLOAD_TYPES = [
 /** Shown in the browser. Everything else downloads. */
 export const INLINE_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
 
-export type FileKind = "proof" | "program" | "guideline" | "store";
+export type FileKind = "proof" | "program" | "guideline" | "store" | "sample";
 
 export function isUpload(url: string): boolean {
   return url.startsWith(UPLOAD_PREFIX);

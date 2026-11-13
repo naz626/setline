@@ -52,6 +52,15 @@ export const VERSION_STYLES = {
   withdrawn: { ...HEALTH_STYLES.notStarted, label: "Approval withdrawn" },
 } satisfies Record<string, StatusStyle>;
 
+export type SampleStatusKey = "notSent" | "needsDecision" | "changesRequested" | "approved";
+
+export const SAMPLE_STYLES: Record<SampleStatusKey, StatusStyle> = {
+  notSent: { ...HEALTH_STYLES.notStarted, label: "Not sent yet" },
+  needsDecision: APPROVAL_STYLES.needsDecision,
+  changesRequested: APPROVAL_STYLES.changesRequested,
+  approved: APPROVAL_STYLES.approved,
+};
+
 export type StoreStatusKey = "notShipped" | "shipped" | "delivered" | "installed";
 
 export const STORE_STYLES: Record<StoreStatusKey, StatusStyle> = {

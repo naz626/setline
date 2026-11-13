@@ -21,6 +21,7 @@ import type { StepInput } from "@/lib/services/leadTimes";
 import { addGuidelineVersion, createGuideline, deleteGuideline } from "@/lib/services/guidelines";
 import { assignVendor, completeNextMilestone, createProgram, giveRetailerSignoff, importPrograms, moveInStoreDate, setMilestoneDate, undoMilestone, updateProgramDetails, updateProgramLeadTimes, withdrawRetailerSignoff } from "@/lib/services/programs";
 import { addProofComment, decideProof, submitProof } from "@/lib/services/proofs";
+import { decideSample, submitSamplePhoto } from "@/lib/services/samples";
 import { addStores, markAllStores, markStore, removeStore, resetStore, removeStorePhoto, setStorePhoto } from "@/lib/services/stores";
 import { inviteMember, revokeInvitation } from "@/lib/services/team";
 import { completeVendorMilestone, createVendor, setVendorStatus } from "@/lib/services/vendors";
@@ -334,6 +335,21 @@ export async function addProofCommentAction(_prev: FormState, formData: FormData
     const rawY = text(formData, "pinY");
     const pin = rawX && rawY ? { x: Number(rawX), y: Number(rawY) } : undefined;
     await addProofComment(await getDb(), member, text(formData, "proofId"), text(formData, "body"), pin);
+  });
+}
+
+export async function submitSampleAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await submitSamplePhoto(await getDb(), member, { programId: text(formData, "programId"), url: text(formData, "url"), note: text(formData, "note") });
+    await announce(member, { type: "sampleSent", programId: text(formData, "programId") });
+    return "Sent for approval.";
+  });
+}
+
+export async function decideSampleAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  return attempt(async (member) => {
+    await decideSample(await getDb(), member, { programId: text(formData, "programId"), decision: text(formData, "decision"), note: text(formData, "note") });
+    await announce(member, { type: "sampleDecided", programId: text(formData, "programId") });
   });
 }
 

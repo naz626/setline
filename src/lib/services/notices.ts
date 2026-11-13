@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
-import { memberships, programChanges, programs, proofs, users, vendors } from "@/lib/db/schema";
+import { memberships, programChanges, programs, proofs, sampleApprovals, users, vendors } from "@/lib/db/schema";
 import type { Role } from "@/lib/db/schema";
 import { PLANS } from "@/lib/plans";
 import { formatLong, formatShort } from "@/lib/timeline";
@@ -14,6 +14,8 @@ export type NoticeEvent =
   | { type: "vendorStatus"; programId: string }
   | { type: "proofSent"; proofId: string }
   | { type: "proofDecided"; proofId: string }
+  | { type: "sampleSent"; programId: string }
+  | { type: "sampleDecided"; programId: string }
   | { type: "changeLogged"; changeId: string };
 
 export interface Notice {
@@ -59,11 +61,16 @@ export async function buildNotice(db: Db, member: Member, event: NoticeEvent): P
   const workspaceId = member.workspace.id;
   let programId: string;
   let proof: typeof proofs.$inferSelect | undefined;
+  let sample: typeof sampleApprovals.$inferSelect | undefined;
   let change: typeof programChanges.$inferSelect | undefined;
   if (event.type === "proofSent" || event.type === "proofDecided") {
     [proof] = await db.select().from(proofs).where(and(eq(proofs.id, event.proofId), eq(proofs.workspaceId, workspaceId)));
     if (!proof) return undefined;
     programId = proof.programId;
+  } else if (event.type === "sampleSent" || event.type === "sampleDecided") {
+    [sample] = await db.select().from(sampleApprovals).where(and(eq(sampleApprovals.programId, event.programId), eq(sampleApprovals.workspaceId, workspaceId)));
+    if (!sample) return undefined;
+    programId = event.programId;
   } else if (event.type === "changeLogged") {
     [change] = await db.select().from(programChanges).where(and(eq(programChanges.id, event.changeId), eq(programChanges.workspaceId, workspaceId)));
     if (!change) return undefined;
@@ -110,6 +117,18 @@ export async function buildNotice(db: Db, member: Member, event: NoticeEvent): P
       ? `The ${label}, for ${program.name} was approved.`
       : `Changes were requested on the ${label}, for ${program.name}.\n\n“${proof.decisionNote}”\n\nSend a new version when it is ready.`;
     path = { brand: `/approvals/${proof.id}`, vendor: `/approvals/${proof.id}` };
+  } else if (event.type === "sampleSent" && sample) {
+    to = await emailsWithRoles(db, workspaceId, ["brandAdmin", "programManager", "reviewer"]);
+    subject = `Needs a decision: sample photos for ${program.name}`;
+    text = `Sample photos for ${program.name} are ready for review.${sample.note ? `\n\nNote: ${sample.note}` : ""}`;
+  } else if (event.type === "sampleDecided" && sample) {
+    const [uploader] = sample.uploadedBy ? await db.select({ email: users.email }).from(users).where(eq(users.id, sample.uploadedBy)) : [];
+    to = [...contacts, ...(uploader ? [uploader.email] : [])];
+    const approved = sample.decision === "approved";
+    subject = approved ? `Approved: sample photos for ${program.name}` : `Changes requested: sample photos for ${program.name}`;
+    text = approved
+      ? `The sample photos for ${program.name} were approved.`
+      : `Changes were requested on the sample photos for ${program.name}.\n\n“${sample.decisionNote}”\n\nSend new photos when they are ready.`;
   } else if (event.type === "changeLogged" && change) {
     to = contacts;
     subject = `Change to ${program.name}`;

@@ -11,6 +11,7 @@ import { findMember } from "./member";
 import type { Member } from "./member";
 import { assignVendor, completeNextMilestone, createProgram, findVisibleProgram, getProgramView, moveInStoreDate } from "./programs";
 import { addProofComment, decideProof, getProofDetail, listApprovalItems, submitProof } from "./proofs";
+import { decideSample, getSampleApproval, submitSamplePhoto } from "./samples";
 import { addStores, listStores, markAllStores, markStore, removeStore, resetStore, storeStep } from "./stores";
 import { inviteMember, listMembers } from "./team";
 import { completeVendorMilestone, createVendor, listStatusHistory, listVendors, setVendorStatus } from "./vendors";
@@ -132,6 +133,41 @@ describe("vendor status", () => {
     expect(await getProgramView(db, acmeRep, id)).toBeUndefined();
     await expect(assignVendor(db, manager, id, "nope")).rejects.toThrow(InputError);
     await expect(assignVendor(db, reviewer, id, acmeId)).rejects.toThrow(ForbiddenError);
+  });
+});
+
+describe("sample-photo approvals", () => {
+  it("has no versioning: a resubmission replaces the one row and clears its decision", async () => {
+    expect(await getSampleApproval(db, admin, programId)).toBeUndefined();
+    await expect(submitSamplePhoto(db, reviewer, { programId, url: "https://files.test/sample-1.jpg", note: "" })).rejects.toThrow(ForbiddenError);
+    await submitSamplePhoto(db, acmeRep, { programId, url: "https://files.test/sample-1.jpg", note: "First sample" });
+    let row = await getSampleApproval(db, admin, programId);
+    expect(row).toMatchObject({ url: "https://files.test/sample-1.jpg", note: "First sample", decision: null });
+
+    await expect(decideSample(db, acmeRep, { programId, decision: "approved", note: "" })).rejects.toThrow(ForbiddenError);
+    await expect(decideSample(db, reviewer, { programId, decision: "changesRequested", note: " " })).rejects.toThrow(/what needs to change/);
+    await decideSample(db, reviewer, { programId, decision: "changesRequested", note: "Color is off" });
+    await expect(decideSample(db, reviewer, { programId, decision: "approved", note: "" })).rejects.toThrow(/already/);
+
+    // A new photo replaces the row and reopens the decision, with no history of the earlier one.
+    await submitSamplePhoto(db, acmeRep, { programId, url: "https://files.test/sample-2.jpg", note: "" });
+    row = await getSampleApproval(db, admin, programId);
+    expect(row).toMatchObject({ url: "https://files.test/sample-2.jpg", decision: null, decisionNote: "" });
+
+    await decideSample(db, reviewer, { programId, decision: "approved", note: "" });
+    row = await getSampleApproval(db, admin, programId);
+    expect(row?.decision).toBe("approved");
+  });
+
+  it("keeps other vendors and retailer guests out, and refuses once shipped", async () => {
+    await expect(submitSamplePhoto(db, otherRep, { programId, url: "https://files.test/sneak.jpg", note: "" })).rejects.toThrow(InputError);
+    await expect(getSampleApproval(db, retailer, programId)).rejects.toThrow(ForbiddenError);
+    const shippedId = await newProgram("Already shipped", acmeId, addDays(today, 150));
+    await completeNextMilestone(db, admin, shippedId, "submit");
+    for (const milestone of ["quoteApproved", "structuralProofApproved", "printProofApproved", "productionComplete", "shipped"] as const) {
+      await completeNextMilestone(db, admin, shippedId, milestone);
+    }
+    await expect(submitSamplePhoto(db, admin, { programId: shippedId, url: "https://files.test/late.jpg", note: "" })).rejects.toThrow(/shipped/);
   });
 });
 

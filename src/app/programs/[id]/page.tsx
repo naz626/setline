@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import { GuidelineLinks } from "@/components/Guidelines";
 import { AddFileForm, ChangeInStoreDateForm, CompleteMilestoneForm, EditDetailsForm, EditMilestoneForm, LogChangeForm, MoveInStoreDateForm, ProgramLeadTimesForm, RetailerSignoffForm } from "@/components/ProgramForms";
 import { SubmitProofForm } from "@/components/ProofForms";
+import { DecideSampleForm, SubmitSampleForm } from "@/components/SampleForms";
 import { AssignVendorForm, VendorStatusForm } from "@/components/VendorForms";
 import { StatusPill } from "@/components/StatusPill";
 import { can, isBrandRole } from "@/lib/auth/permissions";
@@ -16,9 +17,10 @@ import { FILE_LABELS, listProgramFiles } from "@/lib/services/files";
 import { guidelinesForProgram } from "@/lib/services/guidelines";
 import { getProgramView } from "@/lib/services/programs";
 import { PROOF_KINDS, PROOF_LABELS, approvalStatus, listProofsForProgram, versionStatus } from "@/lib/services/proofs";
+import { getSampleApproval, sampleStatus } from "@/lib/services/samples";
 import { listStores, storeStep } from "@/lib/services/stores";
 import { listStatusHistory, listVendors } from "@/lib/services/vendors";
-import { APPROVAL_STYLES, HEALTH_STYLES, STAGES, VENDOR_STYLES, VERSION_STYLES } from "@/lib/status";
+import { APPROVAL_STYLES, HEALTH_STYLES, SAMPLE_STYLES, STAGES, VENDOR_STYLES, VERSION_STYLES } from "@/lib/status";
 import { formatStamp } from "@/lib/today";
 import { fileHref, fileSource } from "@/lib/uploads";
 import { MILESTONES, MILESTONE_LABELS, MILESTONE_OWNER, STEPS, STEP_LABELS, daysBetween, formatLong, formatShort } from "@/lib/timeline";
@@ -36,8 +38,10 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
 
   const canEdit = can(role, "programs.editSchedule");
   const seesProofs = can(role, "proofs.view");
-  const [proofRows, guidelineItems, stores, history, vendorList, files, activity, changes] = await Promise.all([
+  const seesSamples = can(role, "samples.view");
+  const [proofRows, sample, guidelineItems, stores, history, vendorList, files, activity, changes] = await Promise.all([
     seesProofs ? listProofsForProgram(db, member, id) : [],
+    seesSamples ? getSampleApproval(db, member, id) : undefined,
     guidelinesForProgram(db, member, view.program),
     listStores(db, member, id),
     listStatusHistory(db, member, id),
@@ -61,6 +65,7 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
   // New versions and reopened approvals are possible at any point until the program ships.
   const proofsOpen = open && !completed.shipped;
   const proofChoices = PROOF_KINDS.map((kind) => ({ id: kind, label: PROOF_LABELS[kind] }));
+  const sampleStatusKey = sampleStatus(sample);
   const lastDone = [...MILESTONES].reverse().find((key) => completed[key]);
   const unseen = changes.filter((change) => !change.acknowledgedAt).length;
   const zone = member.workspace.timezone;
@@ -318,6 +323,37 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
                     </details>
                   )}
                 </>
+              )}
+            </section>
+          )}
+
+          {seesSamples && (
+            <section className={`${CARD} flex flex-col gap-3`}>
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <h2 className="font-display text-xl font-bold">Sample photos</h2>
+                <StatusPill style={SAMPLE_STYLES[sampleStatusKey]} />
+              </div>
+              {sample && (
+                <>
+                  <a href={fileHref("sample", sample.id, sample.url)} target="_blank" rel="noopener noreferrer" className="inline-flex h-12 w-fit items-center rounded-xl bg-accent px-5 text-sm font-semibold text-ink">
+                    Open the photo<span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                  {sample.note && <p className="text-sm leading-relaxed">“{sample.note}”</p>}
+                  {sample.decision === "changesRequested" && sample.decisionNote && (
+                    <p className="rounded-[14px] bg-canvas px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap">“{sample.decisionNote}”</p>
+                  )}
+                </>
+              )}
+              {!sample && <p className="text-sm text-muted">No sample photos sent yet.</p>}
+              {sampleStatusKey === "needsDecision" && can(role, "samples.decide") && <DecideSampleForm programId={program.id} />}
+              {proofsOpen && can(role, "samples.submit") && (
+                <details className="rounded-[14px] border border-line">
+                  <summary className="cursor-pointer px-4 py-3.5 text-sm font-semibold">{sample ? "Send new sample photos" : "Send sample photos"}</summary>
+                  <div className="border-t border-line p-4">
+                    <SubmitSampleForm programId={program.id} />
+                    {sample && <p className="mt-2 text-[13px] text-muted">Sending new photos replaces the current submission and clears any decision on it.</p>}
+                  </div>
+                </details>
               )}
             </section>
           )}
