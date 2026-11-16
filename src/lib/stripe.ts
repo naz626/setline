@@ -12,6 +12,14 @@ export function stripeConfigured(env = process.env): boolean {
   return Boolean(env.STRIPE_SECRET_KEY);
 }
 
+/**
+ * Sales tax at checkout is switched on with STRIPE_TAX_ENABLED=true, and only once the business has a tax
+ * registration in Stripe Tax. With Tax on but no registration, Stripe collects nothing while it looks as if it does.
+ */
+export function taxEnabled(env = process.env): boolean {
+  return env.STRIPE_TAX_ENABLED === "true";
+}
+
 export type BillingInterval = "monthly" | "yearly";
 
 /** Stripe price IDs are set up by hand in the dashboard; one env var per plan and billing interval. */
@@ -64,9 +72,10 @@ export interface CheckoutSessionInput {
   plan: PlanId;
 }
 
-/** A hosted Stripe Checkout page for a new subscription. The session's URL is where the person is sent. */
-export async function createCheckoutSession(input: CheckoutSessionInput): Promise<{ url: string }> {
-  const session = await call("/checkout/sessions", {
+/** The parameters for a new subscription's Checkout session. Pure, so the tax options can be tested. */
+export function checkoutParams(input: CheckoutSessionInput, env = process.env): Record<string, unknown> {
+  const tax = taxEnabled(env);
+  return {
     mode: "subscription",
     line_items: [{ price: input.priceId, quantity: 1 }],
     success_url: input.successUrl,
@@ -76,7 +85,20 @@ export async function createCheckoutSession(input: CheckoutSessionInput): Promis
     allow_promotion_codes: true,
     metadata: { workspaceId: input.workspaceId, plan: input.plan },
     subscription_data: { metadata: { workspaceId: input.workspaceId, plan: input.plan } },
-  });
+    // Tax is worked out from the customer's billing address, so it has to be collected. A business can add a tax ID.
+    ...(tax && {
+      automatic_tax: { enabled: true },
+      billing_address_collection: "required",
+      tax_id_collection: { enabled: true },
+      // An existing customer's saved address and name are updated from what they enter, so tax uses the new address.
+      customer_update: input.customerId ? { address: "auto", name: "auto" } : undefined,
+    }),
+  };
+}
+
+/** A hosted Stripe Checkout page for a new subscription. The session's URL is where the person is sent. */
+export async function createCheckoutSession(input: CheckoutSessionInput): Promise<{ url: string }> {
+  const session = await call("/checkout/sessions", checkoutParams(input));
   if (!session.url) throw new Error("Stripe did not return a checkout link.");
   return { url: session.url as string };
 }
