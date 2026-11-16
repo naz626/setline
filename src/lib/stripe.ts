@@ -47,6 +47,19 @@ function flatten(params: Record<string, unknown>, prefix = ""): [string, string]
   return pairs;
 }
 
+/** A Stripe API error, with the code Stripe gave it (for example "resource_missing"). */
+export class StripeError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+    this.name = "StripeError";
+  }
+}
+
+/** True when Stripe says the customer id it was sent does not exist, such as a test-mode id used against live mode. */
+export function isMissingCustomer(error: unknown): boolean {
+  return error instanceof StripeError && error.code === "resource_missing" && /No such customer/i.test(error.message);
+}
+
 async function call(path: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("Stripe is not configured.");
@@ -58,7 +71,10 @@ async function call(path: string, params: Record<string, unknown>): Promise<Reco
     signal: AbortSignal.timeout(10_000),
   });
   const data = await response.json();
-  if (!response.ok) throw new Error((data?.error as { message?: string } | undefined)?.message ?? `Stripe answered ${response.status}.`);
+  if (!response.ok) {
+    const err = data?.error as { message?: string; code?: string } | undefined;
+    throw new StripeError(err?.message ?? `Stripe answered ${response.status}.`, err?.code);
+  }
   return data;
 }
 

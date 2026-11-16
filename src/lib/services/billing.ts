@@ -7,7 +7,7 @@ import {
   DATA_RETENTION_DAYS, DELETION_WARNING_DAYS, FOUNDING_PLACES, PLANS, TRIAL_DAYS, TRIAL_EXTENSION_DAYS, TRIAL_REMINDER_DAYS, isPlanId, planState, trialDay,
 } from "@/lib/plans";
 import type { PlanState } from "@/lib/plans";
-import { createCheckoutSession, createPortalSession, priceIdFor, stripeConfigured } from "@/lib/stripe";
+import { createCheckoutSession, createPortalSession, isMissingCustomer, priceIdFor, stripeConfigured } from "@/lib/stripe";
 import type { BillingInterval } from "@/lib/stripe";
 import { uploadsConfigured } from "@/lib/uploads";
 import { InputError } from "./errors";
@@ -211,19 +211,29 @@ export async function beginCheckout(db: Db, member: Member, input: { plan: strin
   if (!stripeConfigured()) throw new InputError("Card checkout is not set up for this site yet.");
   if (input.plan !== "starter" && input.plan !== "team") throw new InputError("Choose a plan.");
   if (input.interval !== "monthly" && input.interval !== "yearly") throw new InputError("Choose monthly or yearly billing.");
-  const priceId = priceIdFor(input.plan, input.interval as BillingInterval);
-  if (!priceId) throw new InputError(`${PLANS[input.plan].name} is not set up for ${input.interval} billing yet.`);
+  const plan = input.plan;
+  const priceId = priceIdFor(plan, input.interval as BillingInterval);
+  if (!priceId) throw new InputError(`${PLANS[plan].name} is not set up for ${input.interval} billing yet.`);
   const workspace = await findWorkspace(db, member.workspace.id);
-  const session = await createCheckoutSession({
-    priceId,
-    customerId: workspace.stripeCustomerId ?? undefined,
-    customerEmail: workspace.stripeCustomerId ? undefined : member.user.email,
-    successUrl: input.successUrl,
-    cancelUrl: input.cancelUrl,
-    workspaceId: workspace.id,
-    plan: input.plan,
-  });
-  return session.url;
+  const start = (customerId: string | undefined) =>
+    createCheckoutSession({
+      priceId,
+      customerId,
+      customerEmail: customerId ? undefined : member.user.email,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      workspaceId: workspace.id,
+      plan,
+    });
+  try {
+    return (await start(workspace.stripeCustomerId ?? undefined)).url;
+  } catch (error) {
+    // A saved customer id that Stripe no longer knows (for example one from test mode) must not block checkout:
+    // forget it and start again as a new customer.
+    if (!workspace.stripeCustomerId || !isMissingCustomer(error)) throw error;
+    await forgetStripeIds(db, workspace.id);
+    return (await start(undefined)).url;
+  }
 }
 
 /** The hosted page where a brand admin updates their card, switches plan, or cancels. */
@@ -232,8 +242,17 @@ export async function beginBillingPortal(db: Db, member: Member, returnUrl: stri
   if (!stripeConfigured()) throw new InputError("Card checkout is not set up for this site yet.");
   const workspace = await findWorkspace(db, member.workspace.id);
   if (!workspace.stripeCustomerId) throw new InputError("Choose a plan first to set up billing.");
-  const session = await createPortalSession(workspace.stripeCustomerId, returnUrl);
-  return session.url;
+  try {
+    return (await createPortalSession(workspace.stripeCustomerId, returnUrl)).url;
+  } catch (error) {
+    if (!isMissingCustomer(error)) throw error;
+    await forgetStripeIds(db, workspace.id);
+    throw new InputError("Your saved billing details are out of date. Choose a plan to set up billing again.");
+  }
+}
+
+async function forgetStripeIds(db: Db, workspaceId: string): Promise<void> {
+  await db.update(workspaces).set({ stripeCustomerId: null, stripeSubscriptionId: null }).where(eq(workspaces.id, workspaceId));
 }
 
 /** Checkout finished: the workspace is now on the plan it paid for. */

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { consumeLoginToken, createLoginToken } from "@/lib/auth/core";
 import { createLocalDb } from "@/lib/db/client";
 import type { Db } from "@/lib/db/client";
@@ -182,6 +182,11 @@ describe("plan limits", () => {
 });
 
 describe("card checkout", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
   it("only a brand admin can start checkout, and only when Stripe is configured", async () => {
     const admin = await newWorkspace("checkout-admin@brand.test", "Checkout Co");
     await inviteMember(db, admin, { email: "pm@checkout.test", role: "programManager", vendorId: "" });
@@ -191,6 +196,28 @@ describe("card checkout", () => {
     await expect(beginCheckout(db, manager, { plan: "starter", interval: "monthly", successUrl: "https://x.test/s", cancelUrl: "https://x.test/c" })).rejects.toThrow(ForbiddenError);
     // STRIPE_SECRET_KEY is not set in tests, so this is as far as checkout can get without a live Stripe account.
     await expect(beginCheckout(db, admin, { plan: "starter", interval: "monthly", successUrl: "https://x.test/s", cancelUrl: "https://x.test/c" })).rejects.toThrow(/not set up/);
+  });
+
+  it("drops a saved customer id that Stripe does not know and starts checkout again", async () => {
+    const admin = await newWorkspace("stale-customer@brand.test", "Stale Co");
+    await db.update(workspaces).set({ stripeCustomerId: "cus_testmode", stripeSubscriptionId: "sub_testmode" }).where(eq(workspaces.id, admin.workspace.id));
+    vi.stubEnv("STRIPE_SECRET_KEY", "rk_test_x");
+    vi.stubEnv("STRIPE_PRICE_STARTER_MONTHLY", "price_x");
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: { body: URLSearchParams }) => {
+      bodies.push(init.body.toString());
+      if (init.body.get("customer")) {
+        return new Response(JSON.stringify({ error: { message: "No such customer: 'cus_testmode'", code: "resource_missing" } }), { status: 400 });
+      }
+      return new Response(JSON.stringify({ id: "cs_1", url: "https://checkout.stripe.test/cs_1" }), { status: 200 });
+    });
+    const url = await beginCheckout(db, admin, { plan: "starter", interval: "monthly", successUrl: "https://x.test/s", cancelUrl: "https://x.test/c" });
+    expect(url).toBe("https://checkout.stripe.test/cs_1");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toContain("customer_email=stale-customer%40brand.test");
+    const [row] = await db.select().from(workspaces).where(eq(workspaces.id, admin.workspace.id));
+    expect(row.stripeCustomerId).toBeNull();
+    expect(row.stripeSubscriptionId).toBeNull();
   });
 
   it("applies a completed checkout, a plan change, and a cancellation from webhook payloads", async () => {
