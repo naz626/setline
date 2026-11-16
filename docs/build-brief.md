@@ -258,3 +258,9 @@ Phase 3:
 - Retailer guests can currently see every program in the workspace (but no proofs). Decide how they are assigned to programs.
 - Hosting, database host, email sender address and file storage choices
 - The name Setline still needs trademark and domain clearance
+
+## Public pages and payment failures
+
+- `/` is the public landing page (signed-in people are sent on to `/programs`); `/pricing`, `/terms`, `/privacy` and `/security` are static public pages inside `PublicShell`. Prices and limits on the pricing page come from `src/lib/plans.ts`, never typed in by hand. The legal pages are plain-language drafts that describe what the app actually does; have a lawyer review them, and update them whenever a provider or data practice changes.
+- `SUPPORT_EMAIL` is shown in the footer and on the policy pages when set. It must be an address that receives mail.
+- A failed card payment (`invoice.payment_failed`) sets `workspaces.paymentFailedAt`, shows a banner, and emails the workspace admins once. The plan stays on while Stripe retries; if the retries run out Stripe cancels the subscription and the workspace goes read-only. An active subscription clears the flag.

@@ -63,6 +63,14 @@ async function PlanBanner() {
   if (!member) return null;
   const state = memberPlanState(member);
   const admin = member.membership.role === "brandAdmin";
+  if (state.status !== "expired" && member.workspace.paymentFailedAt) {
+    return (
+      <p role="status" className="rounded-[14px] bg-[#FADDDB] px-4 py-3 text-sm font-medium text-[#9B1C1C]">
+        Your last card payment did not go through. We will try again, but the workspace will go read-only if it keeps failing.{" "}
+        {admin ? <Link href="/settings/billing" className="font-semibold underline">Update your card</Link> : "Its admin can update the card."}
+      </p>
+    );
+  }
   if (state.status === "expired") {
     return (
       <p role="status" className="rounded-[14px] bg-[#FADDDB] px-4 py-3 text-sm font-medium text-[#9B1C1C]">

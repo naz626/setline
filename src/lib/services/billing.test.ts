@@ -7,7 +7,7 @@ import { programs, vendors, workspaces } from "@/lib/db/schema";
 import { addDays } from "@/lib/timeline";
 import { todayInZone } from "@/lib/today";
 import {
-  ReadOnlyError, applyCheckoutCompleted, applySubscriptionCanceled, applySubscriptionUpdated, assertWritable, beginCheckout, deleteWorkspace,
+  ReadOnlyError, applyCheckoutCompleted, applyPaymentFailed, applySubscriptionCanceled, applySubscriptionUpdated, assertWritable, beginCheckout, deleteWorkspace,
   dueForDeletion, dueForDeletionWarning, dueTrialReminders, extendTrial, isOperator, listWorkspacesForOperator, markDeletionWarned,
   markTrialReminderSent, memberPlanState, setFounding, setWorkspacePlan, workspaceUsage,
 } from "./billing";
@@ -218,6 +218,32 @@ describe("card checkout", () => {
     const [row] = await db.select().from(workspaces).where(eq(workspaces.id, admin.workspace.id));
     expect(row.stripeCustomerId).toBeNull();
     expect(row.stripeSubscriptionId).toBeNull();
+  });
+
+  it("flags a failed payment once, keeps the plan, and clears the flag when the subscription is active again", async () => {
+    const admin = await newWorkspace("failed-pay@brand.test", "Failed Pay Co");
+    const workspaceId = admin.workspace.id;
+    await applyCheckoutCompleted(db, { customer: "cus_failed", subscription: "sub_failed", metadata: { workspaceId, plan: "starter" } });
+
+    const first = await applyPaymentFailed(db, { customer: "cus_failed" });
+    expect(first?.to).toEqual(["failed-pay@brand.test"]);
+    let [row] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(row.paymentFailedAt).not.toBeNull();
+    expect(row.plan).toBe("starter");
+
+    // Stripe retries and sends the event again: no second email.
+    expect(await applyPaymentFailed(db, { customer: "cus_failed" })).toBeUndefined();
+    expect(await applyPaymentFailed(db, { customer: "cus_unknown" })).toBeUndefined();
+
+    await applySubscriptionUpdated(db, { id: "sub_failed", customer: "cus_failed", status: "active", metadata: { plan: "starter" } });
+    [row] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(row.paymentFailedAt).toBeNull();
+
+    await applyPaymentFailed(db, { customer: "cus_failed" });
+    await applySubscriptionCanceled(db, "cus_failed");
+    [row] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(row.plan).toBe("trial");
+    expect(row.paymentFailedAt).toBeNull();
   });
 
   it("applies a completed checkout, a plan change, and a cancellation from webhook payloads", async () => {

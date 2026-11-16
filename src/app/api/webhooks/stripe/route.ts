@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getDb } from "@/lib/db/client";
-import { applyCheckoutCompleted, applySubscriptionCanceled, applySubscriptionUpdated } from "@/lib/services/billing";
+import { emailConfigured, sendEmail } from "@/lib/email";
+import { applyCheckoutCompleted, applyPaymentFailed, applySubscriptionCanceled, applySubscriptionUpdated } from "@/lib/services/billing";
 import { verifyStripeSignature } from "@/lib/stripe";
 
 /**
@@ -27,7 +28,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     if (event.type === "checkout.session.completed") await applyCheckoutCompleted(db, object);
     else if (event.type === "customer.subscription.updated") await applySubscriptionUpdated(db, object);
-    else if (event.type === "customer.subscription.deleted") await applySubscriptionCanceled(db, String(object.customer ?? ""));
+    else if (event.type === "invoice.payment_failed") {
+      const failed = await applyPaymentFailed(db, object);
+      if (failed && emailConfigured() && process.env.APP_URL) {
+        const base = process.env.APP_URL.replace(/\/$/, "");
+        const text = [
+          `We could not charge the card for ${failed.workspace.name}'s Setline plan.`,
+          "Your workspace keeps working while Stripe tries the payment again over the next few days. To avoid it going read-only, update your card from the billing page (choose Manage billing).",
+          `${base}/settings/billing`,
+        ].join("\n\n");
+        await Promise.allSettled(failed.to.map((to) => sendEmail({ to, subject: "Your Setline payment did not go through", text })));
+      }
+    } else if (event.type === "customer.subscription.deleted") await applySubscriptionCanceled(db, String(object.customer ?? ""));
   } catch (error) {
     console.error(`Setline: could not apply Stripe webhook (${event.type}).`, error);
     // Answer 200 anyway: Stripe retries on failure, and a workspace stuck on the wrong plan is fixed
