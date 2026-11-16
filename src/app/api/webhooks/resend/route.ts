@@ -34,7 +34,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const response = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(event.data.email_id)}`, {
-      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+      // Reading received mail needs a full-access key; the sending key is send-only.
+      headers: { Authorization: `Bearer ${process.env.RESEND_RECEIVING_API_KEY || process.env.RESEND_API_KEY}` },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`Could not read the received email (${response.status}).`);
