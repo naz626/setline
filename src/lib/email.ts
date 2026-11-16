@@ -2,6 +2,9 @@ export interface Email {
   to: string;
   subject: string;
   text: string;
+  html?: string;
+  /** Where a reply should go, when that is not the sender. */
+  replyTo?: string;
 }
 
 export function emailConfigured(): boolean {
@@ -14,7 +17,7 @@ export async function sendEmail(email: Email): Promise<boolean> {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: email.to, subject: email.subject, text: email.text }),
+    body: JSON.stringify({ from: process.env.EMAIL_FROM, to: email.to, subject: email.subject, text: email.text, html: email.html, reply_to: email.replyTo }),
   });
   if (!response.ok) throw new Error(`Email could not be sent (${response.status}).`);
   return true;

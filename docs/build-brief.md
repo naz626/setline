@@ -264,3 +264,7 @@ Phase 3:
 - `/` is the public landing page (signed-in people are sent on to `/programs`); `/pricing`, `/terms`, `/privacy` and `/security` are static public pages inside `PublicShell`. Prices and limits on the pricing page come from `src/lib/plans.ts`, never typed in by hand. The legal pages are plain-language drafts that describe what the app actually does; have a lawyer review them, and update them whenever a provider or data practice changes.
 - `SUPPORT_EMAIL` is shown in the footer and on the policy pages when set. It must be an address that receives mail.
 - A failed card payment (`invoice.payment_failed`) sets `workspaces.paymentFailedAt`, shows a banner, and emails the workspace admins once. The plan stays on while Stripe retries; if the retries run out Stripe cancels the subscription and the workspace goes read-only. An active subscription clears the flag.
+
+## Support mail
+
+Mail sent to any address at setline.team (support@ and so on) is received by Resend, which calls `/api/webhooks/resend` (event `email.received`). The route checks the Svix signature with `RESEND_WEBHOOK_SECRET`, fetches the message through the Resend API, and forwards it to `SUPPORT_FORWARD_TO`, with replies going back to the original sender. Mail from our own domain is never forwarded, so it cannot loop. Needs a Resend API key that can read received email, the receiving MX record on setline.team, and a Resend webhook for `email.received` pointing at the route.
