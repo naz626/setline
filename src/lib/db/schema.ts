@@ -60,6 +60,8 @@ export const workspaces = pgTable("workspaces", {
   /** Set once this workspace has paid by card through Stripe. Used to open the billing portal and to match webhooks. */
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
+  /** When Stripe first reported a failed card payment that is still unresolved. Cleared when the subscription is active again. */
+  paymentFailedAt: timestamp("payment_failed_at", { withTimezone: true }),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("workspaces_stripe_customer_idx").on(t.stripeCustomerId)]);
 

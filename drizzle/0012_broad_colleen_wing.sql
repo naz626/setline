@@ -1,0 +1,1 @@
+ALTER TABLE "workspaces" ADD COLUMN "payment_failed_at" timestamp with time zone;

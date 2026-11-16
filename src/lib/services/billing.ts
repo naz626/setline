@@ -260,7 +260,7 @@ export async function applyCheckoutCompleted(db: Db, session: { customer?: unkno
   const workspaceId = session.metadata?.workspaceId;
   const plan = session.metadata?.plan;
   if (typeof workspaceId !== "string" || typeof plan !== "string" || !isPlanId(plan)) return;
-  await db.update(workspaces).set({ plan, stripeCustomerId: String(session.customer ?? ""), stripeSubscriptionId: String(session.subscription ?? "") || null }).where(eq(workspaces.id, workspaceId));
+  await db.update(workspaces).set({ plan, stripeCustomerId: String(session.customer ?? ""), stripeSubscriptionId: String(session.subscription ?? "") || null, paymentFailedAt: null }).where(eq(workspaces.id, workspaceId));
 }
 
 /** A subscription changed status at Stripe: moved to a different plan, or lapsed. */
@@ -272,7 +272,8 @@ export async function applySubscriptionUpdated(db: Db, subscription: { id?: unkn
   const status = String(subscription.status ?? "");
   if (status === "active" || status === "trialing") {
     const plan = subscription.metadata?.plan;
-    const update: { stripeSubscriptionId: string | null; plan?: WorkspaceRow["plan"] } = { stripeSubscriptionId: String(subscription.id ?? "") || null };
+    // Active again means any failed payment has been paid, so the warning goes away.
+    const update: { stripeSubscriptionId: string | null; paymentFailedAt: null; plan?: WorkspaceRow["plan"] } = { stripeSubscriptionId: String(subscription.id ?? "") || null, paymentFailedAt: null };
     if (typeof plan === "string" && isPlanId(plan) && plan !== workspace.plan) update.plan = plan;
     await db.update(workspaces).set(update).where(eq(workspaces.id, workspace.id));
   } else if (status === "canceled" || status === "unpaid" || status === "incomplete_expired") {
@@ -288,7 +289,23 @@ export async function applySubscriptionUpdated(db: Db, subscription: { id?: unkn
 export async function applySubscriptionCanceled(db: Db, customerId: string): Promise<void> {
   const [workspace] = await db.select().from(workspaces).where(eq(workspaces.stripeCustomerId, customerId));
   if (!workspace || workspace.plan === "trial") return;
-  await db.update(workspaces).set({ plan: "trial", trialEndsAt: new Date(), stripeSubscriptionId: null }).where(eq(workspaces.id, workspace.id));
+  await db.update(workspaces).set({ plan: "trial", trialEndsAt: new Date(), stripeSubscriptionId: null, paymentFailedAt: null }).where(eq(workspaces.id, workspace.id));
+}
+
+/**
+ * Stripe could not charge the card. The workspace keeps its plan while Stripe retries on its own schedule;
+ * if the retries run out the subscription is cancelled and `applySubscriptionCanceled` makes it read-only.
+ * Returns who to email only the first time, since Stripe sends this event again for every retry.
+ */
+export async function applyPaymentFailed(db: Db, invoice: { customer?: unknown }, now = new Date()): Promise<{ workspace: WorkspaceRow; to: string[] } | undefined> {
+  const customerId = String(invoice.customer ?? "");
+  if (!customerId) return undefined;
+  const [workspace] = await db.select().from(workspaces).where(eq(workspaces.stripeCustomerId, customerId));
+  if (!workspace || workspace.paymentFailedAt) return undefined;
+  await db.update(workspaces).set({ paymentFailedAt: now }).where(eq(workspaces.id, workspace.id));
+  const admins = await db.select({ email: users.email }).from(memberships).innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(memberships.workspaceId, workspace.id), eq(memberships.role, "brandAdmin")));
+  return { workspace, to: admins.map((a) => a.email) };
 }
 
 export async function deleteWorkspace(db: Db, workspaceId: string): Promise<void> {
