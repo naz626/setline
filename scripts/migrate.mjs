@@ -5,6 +5,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
+import { checkMigrations } from "./migration-guard.mjs";
 
 // Same lookup as src/lib/db/url.ts, but prefers a direct (unpooled) connection, which is safer for schema changes.
 function findUrl(suffix) {
@@ -13,6 +14,14 @@ function findUrl(suffix) {
   const key = Object.keys(process.env).sort().find((name) => pattern.test(name) && process.env[name]);
   return key ? process.env[key] : undefined;
 }
+// Runs first, with or without a database, so an unsafe migration fails the build before anything is applied.
+const unsafe = checkMigrations("drizzle");
+if (unsafe.length > 0) {
+  for (const { file, problems } of unsafe) console.error(`drizzle/${file}: ${problems.join(", ")}`);
+  console.error('Migrations must not destroy customer data. If this is intended, add "-- allow-destructive: <reason>" to the file.');
+  process.exit(1);
+}
+
 const url = findUrl("DATABASE_URL_UNPOOLED") ?? findUrl("DATABASE_URL");
 
 if (!url) {
