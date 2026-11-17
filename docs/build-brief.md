@@ -268,3 +268,7 @@ Phase 3:
 ## Support mail
 
 Mail sent to any address at setline.team (support@ and so on) is received by Resend, which calls `/api/webhooks/resend` (event `email.received`). The route checks the Svix signature with `RESEND_WEBHOOK_SECRET`, fetches the message through the Resend API, and forwards it to `SUPPORT_FORWARD_TO`, with replies going back to the original sender. Mail from our own domain is never forwarded, so it cannot loop. Needs a full-access Resend key in `RESEND_RECEIVING_API_KEY` (the sending key is send-only and cannot read received mail), the receiving MX record on setline.team, and a Resend webhook for `email.received` pointing at the route.
+
+## Keeping customer data safe on deploy
+
+Customer data lives in Neon Postgres, not in the deployment, so a redeploy never touches it. The one thing a deploy does to the database is run the SQL in `drizzle/` during `npm run build`. `scripts/migration-guard.mjs` runs first and fails the build when a migration drops or renames a table or column, truncates, deletes rows or changes a column type, so production keeps serving the previous version and data is untouched. A migration that must do this needs a `-- allow-destructive: <reason>` line and a restore point taken first. Prefer the expand-then-contract pattern: add the new column, deploy code that uses it, backfill, and remove the old column in a later, reviewed change. Preview deployments get their own copy of the database from Neon, so anything created on a preview link is temporary; use setline.team.
