@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { AppShell } from "@/components/AppShell";
+import { LINKEDIN_CONVERSIONS, LinkedInConversion } from "@/components/LinkedInConversion";
 import { StageBar } from "@/components/StageBar";
 import { StatusIcon, StatusPill } from "@/components/StatusPill";
 import { Tour } from "@/components/Tour";
@@ -128,9 +130,17 @@ async function Programs() {
   );
 }
 
-export default function ProgramsPage() {
+async function WelcomeConversion({ searchParams }: Pick<PageProps<"/programs">, "searchParams">) {
+  const { welcome } = await searchParams;
+  return <LinkedInConversion fire={welcome === "1"} conversionId={LINKEDIN_CONVERSIONS.signUp} param="welcome" />;
+}
+
+export default function ProgramsPage(props: PageProps<"/programs">) {
   return (
     <AppShell active="/programs">
+      <Suspense fallback={null}>
+        <WelcomeConversion searchParams={props.searchParams} />
+      </Suspense>
       <Programs />
     </AppShell>
   );

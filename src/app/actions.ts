@@ -143,7 +143,9 @@ export async function createWorkspaceAction(_prev: FormState, formData: FormData
   } catch (error) {
     return failure(error);
   }
-  redirect("/programs");
+  // The ?welcome=1 flag lets the /programs page fire the one-time "signed up" conversion
+  // event client-side; it is stripped from the URL right after.
+  redirect("/programs?welcome=1");
 }
 
 const FILE_FIELDS = ["artwork", "specs", "quantities", "shipTo"] as const;
