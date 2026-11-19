@@ -171,7 +171,9 @@ export async function createProgramAction(_prev: FormState, formData: FormData):
     return failure(error);
   }
   if (submitNow) await announce(member, { type: "submittedToVendor", programId: id });
-  redirect(`/programs/${id}`);
+  // The ?created=1 flag lets the program page fire the one-time "first program created"
+  // conversion event client-side; it is stripped from the URL right after.
+  redirect(`/programs/${id}?created=1`);
 }
 
 export async function completeMilestoneAction(_prev: FormState, formData: FormData): Promise<FormState> {

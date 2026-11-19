@@ -12,6 +12,8 @@ declare global {
 /** LinkedIn Insight Tag conversion ids. Created in Campaign Manager → Measure → Conversion tracking. */
 export const LINKEDIN_CONVERSIONS = {
   signUp: 30726604,
+  firstProgramCreated: 30726612,
+  subscriptionStarted: 30726620,
 } as const;
 
 /**

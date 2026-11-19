@@ -1,6 +1,7 @@
 import { beginBillingPortalAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { CheckoutForm } from "@/components/BillingForms";
+import { LINKEDIN_CONVERSIONS, LinkedInConversion } from "@/components/LinkedInConversion";
 import { StatusPill } from "@/components/StatusPill";
 import { requireBrandMember } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
@@ -28,6 +29,7 @@ async function Billing({ searchParams }: { searchParams: Promise<{ checkout?: st
 
   return (
     <>
+      <LinkedInConversion fire={checkout === "success"} conversionId={LINKEDIN_CONVERSIONS.subscriptionStarted} param="checkout" />
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-display text-4xl font-bold tracking-tight">Billing</h1>
         <StatusPill style={pill} />

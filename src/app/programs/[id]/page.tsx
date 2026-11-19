@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { acknowledgeChangeAction, removeProgramFileAction, withdrawRetailerSignoffAction } from "@/app/actions";
 import { AppShell } from "@/components/AppShell";
 import { GuidelineLinks } from "@/components/Guidelines";
+import { LINKEDIN_CONVERSIONS, LinkedInConversion } from "@/components/LinkedInConversion";
 import { AddFileForm, ChangeInStoreDateForm, CompleteMilestoneForm, EditDetailsForm, EditMilestoneForm, LogChangeForm, MoveInStoreDateForm, ProgramLeadTimesForm, RetailerSignoffForm } from "@/components/ProgramForms";
 import { SubmitProofForm } from "@/components/ProofForms";
 import { DecideSampleForm, SubmitSampleForm } from "@/components/SampleForms";
@@ -27,11 +28,12 @@ import { MILESTONES, MILESTONE_LABELS, MILESTONE_OWNER, STEPS, STEP_LABELS, days
 
 const CARD = "rounded-[18px] border border-line bg-surface px-6 py-5";
 
-async function Program({ params }: { params: Promise<{ id: string }> }) {
+async function Program({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ created?: string }> }) {
   const member = await requireMember();
   const role = member.membership.role;
   if (role === "vendorGuest") redirect("/vendor");
   const { id } = await params;
+  const { created } = await searchParams;
   const db = await getDb();
   const view = await getProgramView(db, member, id);
   if (!view) notFound();
@@ -75,6 +77,7 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <>
+      <LinkedInConversion fire={created === "1"} conversionId={LINKEDIN_CONVERSIONS.firstProgramCreated} param="created" />
       <div className="flex flex-col gap-3">
         <div className="text-[13px] text-muted">
           <Link href="/programs" className="inline-block py-3 hover:text-accent-text">Programs</Link> / {program.name}
@@ -441,10 +444,10 @@ async function Program({ params }: { params: Promise<{ id: string }> }) {
   );
 }
 
-export default function ProgramPage({ params }: { params: Promise<{ id: string }> }) {
+export default function ProgramPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ created?: string }> }) {
   return (
     <AppShell active="/programs">
-      <Program params={params} />
+      <Program params={params} searchParams={searchParams} />
     </AppShell>
   );
 }
